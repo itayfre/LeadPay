@@ -1,4 +1,6 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* Custom styles for Hebrew/RTL support */
 body {
@@ -17,17 +19,4 @@ body {
 
 [dir="ltr"] {
   text-align: left;
-}
-
-/* Ensure smooth transitions when changing direction */
-* {
-  transition-property: none;
-}
-
-.transition-colors,
-.hover\:bg-gray-100:hover,
-.hover\:bg-blue-100:hover {
-  transition-property: background-color, border-color, color, fill, stroke;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 150ms;
 }

@@ -7,6 +7,10 @@ import './i18n';
 import Buildings from './pages/Buildings';
 import Dashboard from './pages/Dashboard';
 import UploadStatement from './pages/UploadStatement';
+import StatementsUpload from './pages/StatementsUpload';
+import Map from './pages/Map';
+import Messages from './pages/Messages';
+import Settings from './pages/Settings';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,6 +40,10 @@ function App() {
           <Route path="/buildings" element={<Buildings />} />
           <Route path="/building/:buildingId" element={<Dashboard />} />
           <Route path="/building/:buildingId/upload" element={<UploadStatement />} />
+          <Route path="/statements" element={<StatementsUpload />} />
+          <Route path="/map" element={<Map />} />
+          <Route path="/messages" element={<Messages />} />
+          <Route path="/settings" element={<Settings />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>
