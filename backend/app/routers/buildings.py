@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List
 from uuid import UUID
 
@@ -16,11 +17,26 @@ router = APIRouter(
 @router.post("/", response_model=BuildingResponse, status_code=status.HTTP_201_CREATED)
 def create_building(building: BuildingCreate, db: Session = Depends(get_db)):
     """Create a new building"""
-    db_building = Building(**building.model_dump())
-    db.add(db_building)
-    db.commit()
-    db.refresh(db_building)
-    return db_building
+    # Check if building with same name already exists
+    existing = db.query(Building).filter(Building.name == building.name).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Building with name '{building.name}' already exists"
+        )
+
+    try:
+        db_building = Building(**building.model_dump())
+        db.add(db_building)
+        db.commit()
+        db.refresh(db_building)
+        return db_building
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Building with name '{building.name}' already exists"
+        )
 
 
 @router.get("/", response_model=List[BuildingResponse])

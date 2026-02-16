@@ -1,19 +1,51 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Layout from '../components/layout/Layout';
 import { buildingsAPI } from '../services/api';
 import type { Building } from '../types';
+import ConfirmDialog from '../components/modals/ConfirmDialog';
+import BuildingEditModal from '../components/modals/BuildingEditModal';
 
 export default function Buildings() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const [buildingToDelete, setBuildingToDelete] = useState<Building | null>(null);
+  const [buildingToEdit, setBuildingToEdit] = useState<Building | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const { data: buildings, isLoading, error } = useQuery({
     queryKey: ['buildings'],
     queryFn: buildingsAPI.list,
   });
+
+  const handleDelete = async () => {
+    if (!buildingToDelete) return;
+
+    try {
+      await buildingsAPI.delete(buildingToDelete.id);
+      queryClient.invalidateQueries({ queryKey: ['buildings'] });
+      setBuildingToDelete(null);
+      setDeleteError(null);
+    } catch (err) {
+      setDeleteError((err as Error).message);
+    }
+  };
+
+  const handleEdit = async (data: Partial<Building>) => {
+    if (!buildingToEdit) return;
+
+    try {
+      await buildingsAPI.update(buildingToEdit.id, data);
+      queryClient.invalidateQueries({ queryKey: ['buildings'] });
+      setBuildingToEdit(null);
+    } catch (err) {
+      throw err;
+    }
+  };
 
   if (isLoading) {
     return (
@@ -73,6 +105,8 @@ export default function Buildings() {
                 key={building.id}
                 building={building}
                 onClick={() => navigate(`/building/${building.id}`)}
+                onEdit={() => setBuildingToEdit(building)}
+                onDelete={() => setBuildingToDelete(building)}
               />
             ))}
           </div>
@@ -96,6 +130,36 @@ export default function Buildings() {
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmDialog
+        isOpen={!!buildingToDelete}
+        title="מחק בניין"
+        message={`האם אתה בטוח שברצונך למחוק את "${buildingToDelete?.name}"? פעולה זו תמחק גם את כל הדיירים, דפי החשבון וההודעות הקשורים לבניין זה. פעולה זו לא ניתנת לביטול!`}
+        confirmText="מחק לצמיתות"
+        cancelText="ביטול"
+        type="danger"
+        onConfirm={handleDelete}
+        onCancel={() => {
+          setBuildingToDelete(null);
+          setDeleteError(null);
+        }}
+      />
+
+      {/* Edit Building Modal */}
+      <BuildingEditModal
+        isOpen={!!buildingToEdit}
+        building={buildingToEdit}
+        onSave={handleEdit}
+        onCancel={() => setBuildingToEdit(null)}
+      />
+
+      {/* Delete Error */}
+      {deleteError && (
+        <div className="fixed bottom-4 right-4 bg-red-50 border-2 border-red-200 rounded-lg p-4 shadow-xl max-w-md">
+          <p className="text-red-800 font-medium">{deleteError}</p>
+        </div>
+      )}
     </Layout>
   );
 }
@@ -103,12 +167,14 @@ export default function Buildings() {
 interface BuildingCardProps {
   building: Building;
   onClick: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
 }
 
-function BuildingCard({ building, onClick }: BuildingCardProps) {
+function BuildingCard({ building, onClick, onEdit, onDelete }: BuildingCardProps) {
   const [showEditMenu, setShowEditMenu] = useState(false);
 
-  const handleEdit = (e: React.MouseEvent) => {
+  const handleMenuToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
     setShowEditMenu(!showEditMenu);
   };
@@ -117,7 +183,7 @@ function BuildingCard({ building, onClick }: BuildingCardProps) {
     <div className="group bg-white rounded-xl shadow-md hover:shadow-2xl transition-all duration-300 overflow-hidden border border-gray-100 hover:border-primary-300 relative">
       {/* Edit Button */}
       <button
-        onClick={handleEdit}
+        onClick={handleMenuToggle}
         className="absolute top-4 left-4 z-10 p-2 bg-white rounded-lg shadow-md hover:bg-gray-50 transition-colors opacity-0 group-hover:opacity-100"
       >
         <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -131,7 +197,7 @@ function BuildingCard({ building, onClick }: BuildingCardProps) {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              alert('ערוך בניין - בקרוב');
+              onEdit();
               setShowEditMenu(false);
             }}
             className="w-full px-4 py-2 text-right hover:bg-gray-100 transition-colors flex items-center gap-2"
@@ -144,7 +210,7 @@ function BuildingCard({ building, onClick }: BuildingCardProps) {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              alert('מחק בניין - בקרוב');
+              onDelete();
               setShowEditMenu(false);
             }}
             className="w-full px-4 py-2 text-right hover:bg-red-50 text-red-600 transition-colors flex items-center gap-2"
