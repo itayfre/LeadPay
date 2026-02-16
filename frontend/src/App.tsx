@@ -11,6 +11,7 @@ import StatementsUpload from './pages/StatementsUpload';
 import Map from './pages/Map';
 import Messages from './pages/Messages';
 import Settings from './pages/Settings';
+import WhatsAppTemplates from './pages/WhatsAppTemplates';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,6 +45,7 @@ function App() {
           <Route path="/map" element={<Map />} />
           <Route path="/messages" element={<Messages />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/whatsapp-templates" element={<WhatsAppTemplates />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

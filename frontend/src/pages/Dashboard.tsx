@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Layout from '../components/layout/Layout';
+import TenantImport from '../components/TenantImport';
 import { paymentsAPI, buildingsAPI, messagesAPI } from '../services/api';
 import type { PaymentStatusResponse, WhatsAppMessage } from '../types';
 
@@ -146,37 +147,42 @@ export default function Dashboard() {
           </select>
         </div>
 
-        {/* Summary Statistics */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            title={t('dashboard.paid')}
-            value={stats.paid_count}
-            total={stats.total_tenants}
-            color="green"
-            icon="✅"
-          />
-          <StatCard
-            title={t('dashboard.unpaid')}
-            value={stats.unpaid_count}
-            total={stats.total_tenants}
-            color="red"
-            icon="❌"
-          />
-          <StatCard
-            title={t('dashboard.totalExpected')}
-            value={`₪${stats.total_expected.toLocaleString()}`}
-            color="blue"
-            icon="💰"
-          />
-          <StatCard
-            title={t('dashboard.collectionRate')}
-            value={`${Math.round(stats.collection_rate * 100)}%`}
-            color="purple"
-            icon="📊"
-          />
-        </div>
+        {/* Show tenant import if no tenants */}
+        {stats.total_tenants === 0 ? (
+          <TenantImport buildingId={buildingId} buildingName={building?.name || 'הבניין'} />
+        ) : (
+          <>
+            {/* Summary Statistics */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard
+                title={t('dashboard.paid')}
+                value={stats.paid_count}
+                total={stats.total_tenants}
+                color="green"
+                icon="✅"
+              />
+              <StatCard
+                title={t('dashboard.unpaid')}
+                value={stats.unpaid_count}
+                total={stats.total_tenants}
+                color="red"
+                icon="❌"
+              />
+              <StatCard
+                title={t('dashboard.totalExpected')}
+                value={`₪${stats.total_expected.toLocaleString()}`}
+                color="blue"
+                icon="💰"
+              />
+              <StatCard
+                title={t('dashboard.collectionRate')}
+                value={`${Math.round(stats.collection_rate * 100)}%`}
+                color="purple"
+                icon="📊"
+              />
+            </div>
 
-        {/* Payment Status Table */}
+            {/* Payment Status Table */}
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -260,6 +266,8 @@ export default function Dashboard() {
             </table>
           </div>
         </div>
+          </>
+        )}
       </div>
 
       {/* WhatsApp Modal */}
