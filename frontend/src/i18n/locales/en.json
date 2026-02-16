@@ -1,0 +1,55 @@
+{
+  "app": {
+    "title": "LeadPay",
+    "subtitle": "Building Management Payment Tracker"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "buildings": "Buildings",
+    "payments": "Payments",
+    "messages": "Messages",
+    "settings": "Settings"
+  },
+  "dashboard": {
+    "title": "Payment Status",
+    "period": "Period",
+    "uploadStatement": "Upload Statement",
+    "sendReminders": "Send Reminders",
+    "paid": "Paid",
+    "unpaid": "Unpaid",
+    "totalExpected": "Expected",
+    "totalCollected": "Collected",
+    "collectionRate": "Collection Rate"
+  },
+  "payment": {
+    "apartment": "Apartment",
+    "tenant": "Tenant",
+    "expected": "Expected",
+    "paid": "Paid",
+    "status": "Status",
+    "actions": "Actions",
+    "sendWhatsApp": "Send Message"
+  },
+  "whatsapp": {
+    "title": "Send WhatsApp Reminders",
+    "generating": "Generating messages...",
+    "ready": "Messages ready",
+    "click": "Click to send",
+    "sent": "Sent"
+  },
+  "upload": {
+    "dragDrop": "Drag file here or click to select",
+    "uploading": "Uploading...",
+    "success": "Uploaded successfully!",
+    "error": "Upload error"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success"
+  }
+}

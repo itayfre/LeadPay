@@ -1,0 +1,55 @@
+{
+  "app": {
+    "title": "LeadPay",
+    "subtitle": "מערכת ניהול תשלומים לבניינים"
+  },
+  "nav": {
+    "dashboard": "לוח בקרה",
+    "buildings": "בניינים",
+    "payments": "תשלומים",
+    "messages": "הודעות",
+    "settings": "הגדרות"
+  },
+  "dashboard": {
+    "title": "סטטוס תשלומים",
+    "period": "תקופה",
+    "uploadStatement": "העלה דף חשבון",
+    "sendReminders": "שלח תזכורות",
+    "paid": "שילמו",
+    "unpaid": "לא שילמו",
+    "totalExpected": "צפוי",
+    "totalCollected": "נגבה",
+    "collectionRate": "אחוז גבייה"
+  },
+  "payment": {
+    "apartment": "דירה",
+    "tenant": "דייר",
+    "expected": "צפוי",
+    "paid": "שולם",
+    "status": "סטטוס",
+    "actions": "פעולות",
+    "sendWhatsApp": "שלח הודעה"
+  },
+  "whatsapp": {
+    "title": "שלח תזכורות WhatsApp",
+    "generating": "מייצר הודעות...",
+    "ready": "הודעות מוכנות",
+    "click": "לחץ כדי לשלוח",
+    "sent": "נשלח"
+  },
+  "upload": {
+    "dragDrop": "גרור קובץ לכאן או לחץ לבחירה",
+    "uploading": "מעלה...",
+    "success": "הועלה בהצלחה!",
+    "error": "שגיאה בהעלאה"
+  },
+  "common": {
+    "save": "שמור",
+    "cancel": "בטל",
+    "delete": "מחק",
+    "edit": "ערוך",
+    "loading": "טוען...",
+    "error": "שגיאה",
+    "success": "הצלחה"
+  }
+}
