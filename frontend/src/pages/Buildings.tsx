@@ -104,7 +104,13 @@ export default function Buildings() {
               <BuildingCard
                 key={building.id}
                 building={building}
-                onClick={() => navigate(`/building/${building.id}`)}
+                onClick={() => {
+                  if ((building.total_tenants || 0) === 0) {
+                    navigate(`/building/${building.id}/tenants`);
+                  } else {
+                    navigate(`/building/${building.id}`);
+                  }
+                }}
                 onEdit={() => setBuildingToEdit(building)}
                 onDelete={() => setBuildingToDelete(building)}
               />

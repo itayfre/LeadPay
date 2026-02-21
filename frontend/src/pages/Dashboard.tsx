@@ -3,7 +3,6 @@ import { useQuery } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Layout from '../components/layout/Layout';
-import TenantImport from '../components/TenantImport';
 import { paymentsAPI, buildingsAPI, messagesAPI } from '../services/api';
 import type { WhatsAppMessage } from '../types';
 
@@ -110,6 +109,12 @@ export default function Dashboard() {
           </div>
           <div className="flex gap-3">
             <button
+              onClick={() => navigate(`/building/${buildingId}/tenants`)}
+              className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors font-medium text-sm"
+            >
+              👥 דיירים
+            </button>
+            <button
               onClick={() => navigate(`/building/${buildingId}/upload`)}
               className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors font-medium"
             >
@@ -151,9 +156,19 @@ export default function Dashboard() {
           </select>
         </div>
 
-        {/* Show tenant import if no tenants */}
+        {/* Show manage tenants CTA if no tenants */}
         {summary.total_tenants === 0 ? (
-          <TenantImport buildingId={buildingId} buildingName={building?.name || 'הבניין'} />
+          <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-8 text-center">
+            <div className="text-5xl mb-3">👥</div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">אין דיירים רשומים</h3>
+            <p className="text-gray-600 mb-5">הוסף דיירים כדי לעקוב אחר תשלומים</p>
+            <button
+              onClick={() => navigate(`/building/${buildingId}/tenants`)}
+              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors shadow-md"
+            >
+              👥 ניהול דיירים
+            </button>
+          </div>
         ) : (
           <>
             {/* Summary Statistics */}
