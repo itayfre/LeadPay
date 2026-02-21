@@ -31,6 +31,14 @@ def test_normalize_phone_with_dashes():
 def test_normalize_phone_with_spaces():
     assert normalize_phone("050 123 4567") == "+972501234567"
 
+def test_normalize_phone_with_972_prefix():
+    """Number starting with 972 (no +) should get + prepended."""
+    assert normalize_phone("972501234567") == "+972501234567"
+
+def test_normalize_phone_972_with_dashes():
+    """Number +972 with dashes in local part should be cleaned."""
+    assert normalize_phone("+972-50-123-4567") == "+972501234567"
+
 
 # --- Integration tests: tenant CRUD ---
 

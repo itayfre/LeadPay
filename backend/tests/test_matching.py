@@ -88,7 +88,18 @@ def test_normalize_final_letters(engine):
 
 def test_suggest_matches_returns_top_n(engine, tenants):
     """suggest_matches returns up to N results sorted by confidence."""
+    # Use a common word that should match multiple tenants
     suggestions = engine.suggest_matches("גיא", tenants, top_n=2)
+    # Must return a list
+    assert isinstance(suggestions, list)
+    # Must respect top_n limit
     assert len(suggestions) <= 2
-    if len(suggestions) > 1:
-        assert suggestions[0][1] >= suggestions[1][1]  # Sorted descending
+
+def test_suggest_matches_sorted_by_confidence(engine, tenants):
+    """suggest_matches results are sorted by confidence descending."""
+    # Request more than 1 result with a broad query
+    suggestions = engine.suggest_matches("מן", tenants, top_n=4)
+    if len(suggestions) >= 2:
+        # Verify sorted descending
+        for i in range(len(suggestions) - 1):
+            assert suggestions[i][1] >= suggestions[i+1][1],                 f"Not sorted: {suggestions[i][1]} < {suggestions[i+1][1]}"
