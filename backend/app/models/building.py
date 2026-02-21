@@ -22,6 +22,7 @@ class Building(Base):
 
     # Relationships
     apartments = relationship("Apartment", back_populates="building", cascade="all, delete-orphan")
+    tenants = relationship("Tenant", back_populates="building", cascade="save-update, merge")
     bank_statements = relationship("BankStatement", back_populates="building", cascade="all, delete-orphan")
     name_mappings = relationship("NameMapping", back_populates="building", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="building", cascade="all, delete-orphan")
