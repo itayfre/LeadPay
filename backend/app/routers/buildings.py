@@ -53,9 +53,9 @@ def _building_with_live_count(building: Building, db: Session) -> dict:
         "name": building.name,
         "address": building.address,
         "city": building.city,
-        "total_units": building.total_units,
+        "bank_account_number": building.bank_account_number,
         "total_tenants": count,
-        "monthly_fee": building.monthly_fee,
+        "expected_monthly_payment": float(building.expected_monthly_payment) if building.expected_monthly_payment else None,
         "created_at": building.created_at.isoformat() if building.created_at else None,
         "updated_at": building.updated_at.isoformat() if building.updated_at else None,
     }
