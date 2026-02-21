@@ -23,6 +23,7 @@ class TenantBase(BaseModel):
 
 class TenantCreate(TenantBase):
     apartment_id: UUID
+    building_id: UUID  # required — which building this tenant belongs to
 
 
 class TenantUpdate(BaseModel):
@@ -43,6 +44,7 @@ class TenantUpdate(BaseModel):
 class TenantResponse(TenantBase):
     id: UUID
     apartment_id: UUID
+    building_id: UUID
     created_at: datetime
     updated_at: datetime
 

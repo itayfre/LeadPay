@@ -46,15 +46,10 @@ def normalize_phone(phone: str) -> str:
 @router.post("/", response_model=TenantResponse, status_code=status.HTTP_201_CREATED)
 def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
     """Create a new tenant"""
-    # Verify apartment exists
     apartment = db.query(Apartment).filter(Apartment.id == tenant.apartment_id).first()
     if not apartment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Apartment with id {tenant.apartment_id} not found"
-        )
+        raise HTTPException(status_code=404, detail=f"Apartment {tenant.apartment_id} not found")
 
-    # Normalize phone number
     tenant_data = tenant.model_dump()
     if tenant_data.get('phone'):
         tenant_data['phone'] = normalize_phone(tenant_data['phone'])
@@ -73,62 +68,42 @@ def list_tenants(
     limit: int = 100,
     db: Session = Depends(get_db)
 ):
-    """Get all tenants, optionally filtered by building, with apartment info."""
+    """Get all tenants (optionally filtered by building), with apartment and building info."""
+    query = (
+        db.query(Tenant, Apartment, Building)
+        .join(Apartment, Tenant.apartment_id == Apartment.id)
+        .join(Building, Tenant.building_id == Building.id)
+    )
     if building_id:
-        results = (
-            db.query(Tenant, Apartment)
-            .join(Apartment, Tenant.apartment_id == Apartment.id)
-            .filter(Apartment.building_id == building_id)
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
-        return [
-            {
-                "id": str(tenant.id),
-                "apartment_id": str(tenant.apartment_id),
-                "apartment_number": apartment.number,
-                "floor": apartment.floor,
-                "name": tenant.name,
-                "full_name": tenant.full_name,
-                "phone": tenant.phone,
-                "email": tenant.email,
-                "language": tenant.language.value if hasattr(tenant.language, 'value') else tenant.language,
-                "ownership_type": tenant.ownership_type.value if hasattr(tenant.ownership_type, 'value') else tenant.ownership_type,
-                "is_committee_member": tenant.is_committee_member,
-                "has_standing_order": tenant.has_standing_order,
-                "bank_name": tenant.bank_name,
-                "bank_account": tenant.bank_account,
-                "notes": tenant.notes,
-                "is_active": tenant.is_active,
-                "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
-                "updated_at": tenant.updated_at.isoformat() if tenant.updated_at else None,
-            }
-            for tenant, apartment in results
-        ]
-    else:
-        tenants = db.query(Tenant).offset(skip).limit(limit).all()
-        return [
-            {
-                "id": str(t.id),
-                "apartment_id": str(t.apartment_id),
-                "name": t.name,
-                "full_name": t.full_name,
-                "phone": t.phone,
-                "email": t.email,
-                "language": t.language.value if hasattr(t.language, 'value') else t.language,
-                "ownership_type": t.ownership_type.value if hasattr(t.ownership_type, 'value') else t.ownership_type,
-                "is_committee_member": t.is_committee_member,
-                "has_standing_order": t.has_standing_order,
-                "bank_name": t.bank_name,
-                "bank_account": t.bank_account,
-                "notes": t.notes,
-                "is_active": t.is_active,
-                "created_at": t.created_at.isoformat() if t.created_at else None,
-                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
-            }
-            for t in tenants
-        ]
+        query = query.filter(Tenant.building_id == building_id)
+
+    results = query.offset(skip).limit(limit).all()
+
+    return [
+        {
+            "id": str(tenant.id),
+            "apartment_id": str(tenant.apartment_id),
+            "building_id": str(tenant.building_id),
+            "building_name": building.name,
+            "apartment_number": apartment.number,
+            "floor": apartment.floor,
+            "name": tenant.name,
+            "full_name": tenant.full_name,
+            "phone": tenant.phone,
+            "email": tenant.email,
+            "language": tenant.language.value if hasattr(tenant.language, 'value') else tenant.language,
+            "ownership_type": tenant.ownership_type.value if hasattr(tenant.ownership_type, 'value') else tenant.ownership_type,
+            "is_committee_member": tenant.is_committee_member,
+            "has_standing_order": tenant.has_standing_order,
+            "bank_name": tenant.bank_name,
+            "bank_account": tenant.bank_account,
+            "notes": tenant.notes,
+            "is_active": tenant.is_active,
+            "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
+            "updated_at": tenant.updated_at.isoformat() if tenant.updated_at else None,
+        }
+        for tenant, apartment, building in results
+    ]
 
 
 @router.get("/{tenant_id}", response_model=TenantResponse)
@@ -367,6 +342,7 @@ async def import_tenants_from_excel(
 
             tenant = Tenant(
                 apartment_id=apartment.id,
+                building_id=building_id,
                 name=row['name'],
                 full_name=row['name'],
                 phone=phone,

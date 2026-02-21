@@ -46,6 +46,7 @@ def test_create_tenant_requires_valid_apartment():
     """Creating a tenant with non-existent apartment_id returns 404."""
     response = client.post("/api/v1/tenants/", json={
         "apartment_id": "00000000-0000-0000-0000-000000000000",
+        "building_id": "00000000-0000-0000-0000-000000000001",
         "name": "Test Tenant",
         "ownership_type": "בעלים"
     })
