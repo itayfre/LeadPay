@@ -20,17 +20,26 @@ def normalize_phone(phone: str) -> str:
     if not phone:
         return None
 
+    phone_str = str(phone).strip()
+
+    # If already in +972 format, return as-is (strip only non-digits after the +)
+    if phone_str.startswith('+972'):
+        digits = ''.join(filter(str.isdigit, phone_str[4:]))
+        return '+972' + digits
+
     # Remove spaces, dashes, and other non-numeric characters
-    phone = ''.join(filter(str.isdigit, str(phone)))
+    phone_digits = ''.join(filter(str.isdigit, phone_str))
+
+    # If it starts with 972 (country code without +), strip it
+    if phone_digits.startswith('972'):
+        return '+972' + phone_digits[3:]
 
     # If it starts with 0, replace with +972
-    if phone.startswith('0'):
-        phone = '+972' + phone[1:]
-    # If it doesn't start with +, add +972
-    elif not phone.startswith('+'):
-        phone = '+972' + phone
+    if phone_digits.startswith('0'):
+        return '+972' + phone_digits[1:]
 
-    return phone
+    # Otherwise prepend +972
+    return '+972' + phone_digits
 
 
 @router.post("/", response_model=TenantResponse, status_code=status.HTTP_201_CREATED)
