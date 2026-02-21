@@ -139,6 +139,43 @@ def delete_tenant(tenant_id: UUID, db: Session = Depends(get_db)):
     return None
 
 
+@router.get("/{building_id}/apartments/{apt_number}")
+def get_or_create_apartment(
+    building_id: UUID,
+    apt_number: int,
+    floor: int = 0,
+    db: Session = Depends(get_db)
+):
+    """Find or create an apartment by building + number. Returns apartment_id."""
+    building = db.query(Building).filter(Building.id == building_id).first()
+    if not building:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Building with id {building_id} not found"
+        )
+
+    apartment = db.query(Apartment).filter(
+        Apartment.building_id == building_id,
+        Apartment.number == apt_number
+    ).first()
+
+    if not apartment:
+        apartment = Apartment(
+            building_id=building_id,
+            number=apt_number,
+            floor=floor
+        )
+        db.add(apartment)
+        db.commit()
+        db.refresh(apartment)
+
+    return {
+        "apartment_id": str(apartment.id),
+        "apartment_number": apartment.number,
+        "floor": apartment.floor
+    }
+
+
 @router.post("/{building_id}/import", status_code=status.HTTP_201_CREATED)
 async def import_tenants_from_excel(
     building_id: UUID,
@@ -148,7 +185,8 @@ async def import_tenants_from_excel(
     """
     Import tenants from an Excel file for a specific building.
     Expected columns: דירה (apartment), קומה (floor), שם (name),
-    טלפון (phone), דואל (email), סוג בעלות (ownership type)
+    טלפון (phone), דואל (email), סוג בעלות (ownership type),
+    שם בנק (bank name), חשבון בנק (bank account)
     """
     # Verify building exists
     building = db.query(Building).filter(Building.id == building_id).first()
@@ -175,7 +213,9 @@ async def import_tenants_from_excel(
         'שם': 'name',
         'טלפון': 'phone',
         'דואל': 'email',
-        'סוג בעלות': 'ownership_type'
+        'סוג בעלות': 'ownership_type',
+        'שם בנק': 'bank_name',
+        'חשבון בנק': 'bank_account',
     }
 
     df = df.rename(columns=column_mapping)
@@ -194,6 +234,16 @@ async def import_tenants_from_excel(
 
     for index, row in df.iterrows():
         try:
+            # Get tenant name for error messages
+            tenant_name_raw = row.get('name')
+            tenant_name_for_error = str(tenant_name_raw).strip() if pd.notna(tenant_name_raw) else f'שורה {index + 1}'
+
+            # Check for missing apartment number
+            apt_val = row.get('apartment')
+            if pd.isna(apt_val) or apt_val is None:
+                errors.append(f"שורה {index + 1}: מספר דירה חסר עבור {tenant_name_for_error}. אנא הוסף ידנית.")
+                continue
+
             # Get or create apartment
             apartment = db.query(Apartment).filter(
                 Apartment.building_id == building_id,
@@ -225,13 +275,19 @@ async def import_tenants_from_excel(
             phone = normalize_phone(row['phone']) if pd.notna(row.get('phone')) else None
             email = row.get('email') if pd.notna(row.get('email')) else None
 
+            # Map optional bank columns
+            bank_name = str(row.get('bank_name', '')).strip() if pd.notna(row.get('bank_name')) else None
+            bank_account = str(row.get('bank_account', '')).strip() if pd.notna(row.get('bank_account')) else None
+
             tenant = Tenant(
                 apartment_id=apartment.id,
                 name=row['name'],
-                full_name=row['name'],  # Use same for now, can be updated later
+                full_name=row['name'],
                 phone=phone,
                 email=email,
                 ownership_type=ownership_type,
+                bank_name=bank_name,
+                bank_account=bank_account,
                 is_active=True
             )
             db.add(tenant)
