@@ -20,7 +20,7 @@ class NameMapping(Base):
     building_id = Column(UUID(as_uuid=True), ForeignKey("buildings.id"), nullable=False)
     bank_name = Column(String, nullable=False, comment="Name as it appears in bank statement")
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
-    created_by = Column(SQLEnum(MappingCreatedBy), default=MappingCreatedBy.MANUAL)
+    created_by = Column(SQLEnum(MappingCreatedBy, values_callable=lambda x: [e.value for e in x]), default=MappingCreatedBy.MANUAL)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships

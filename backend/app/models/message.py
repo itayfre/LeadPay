@@ -27,10 +27,10 @@ class Message(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     building_id = Column(UUID(as_uuid=True), ForeignKey("buildings.id"), nullable=False)
-    message_type = Column(SQLEnum(MessageType), default=MessageType.REMINDER)
+    message_type = Column(SQLEnum(MessageType, values_callable=lambda x: [e.value for e in x]), default=MessageType.REMINDER)
     message_text = Column(String, nullable=False)
     sent_at = Column(DateTime, nullable=True)
-    delivery_status = Column(SQLEnum(DeliveryStatus), default=DeliveryStatus.PENDING)
+    delivery_status = Column(SQLEnum(DeliveryStatus, values_callable=lambda x: [e.value for e in x]), default=DeliveryStatus.PENDING)
     period_month = Column(Integer, nullable=True)
     period_year = Column(Integer, nullable=True)
 

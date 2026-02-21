@@ -34,10 +34,10 @@ class Transaction(Base):
     credit_amount = Column(Numeric(10, 2), nullable=True)
     debit_amount = Column(Numeric(10, 2), nullable=True)
     balance = Column(Numeric(10, 2), nullable=True)
-    transaction_type = Column(SQLEnum(TransactionType), default=TransactionType.OTHER)
+    transaction_type = Column(SQLEnum(TransactionType, values_callable=lambda x: [e.value for e in x]), default=TransactionType.OTHER)
     matched_tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=True)
     match_confidence = Column(Float, nullable=True, comment="Confidence score 0-1")
-    match_method = Column(SQLEnum(MatchMethod), nullable=True)
+    match_method = Column(SQLEnum(MatchMethod, values_callable=lambda x: [e.value for e in x]), nullable=True)
     is_confirmed = Column(Boolean, default=False, comment="User verified this match")
     created_at = Column(DateTime, default=datetime.utcnow)
 
