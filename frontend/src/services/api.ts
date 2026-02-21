@@ -1,4 +1,4 @@
-import type { Building, PaymentStatusResponse, WhatsAppMessage, BankStatement, Transaction } from '../types';
+import type { Building, Tenant, PaymentStatusResponse, WhatsAppMessage, BankStatement, Transaction } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -122,4 +122,39 @@ export const tenantsAPI = {
 
     return response.json();
   },
+
+  list: (buildingId: string) =>
+    fetchAPI<Tenant[]>(`/api/v1/tenants/?building_id=${buildingId}`),
+
+  create: (data: {
+    apartment_id: string;
+    name: string;
+    full_name?: string;
+    ownership_type: string;
+    phone?: string;
+    email?: string;
+    bank_name?: string;
+    bank_account?: string;
+    language?: string;
+    has_standing_order?: boolean;
+    is_active?: boolean;
+  }) =>
+    fetchAPI<Tenant>('/api/v1/tenants/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (tenantId: string, data: Partial<Tenant>) =>
+    fetchAPI<Tenant>(`/api/v1/tenants/${tenantId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (tenantId: string) =>
+    fetchAPI<void>(`/api/v1/tenants/${tenantId}`, { method: 'DELETE' }),
+
+  resolveApartment: (buildingId: string, aptNumber: number) =>
+    fetchAPI<{ apartment_id: string; apartment_number: number; floor: number }>(
+      `/api/v1/tenants/${buildingId}/apartments/${aptNumber}`
+    ),
 };

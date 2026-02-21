@@ -23,10 +23,15 @@ export interface Tenant {
   ownership_type: 'בעלים' | 'משכיר' | 'שוכר';
   is_committee_member: boolean;
   has_standing_order: boolean;
+  bank_name?: string;
+  bank_account?: string;
   notes?: string;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  // Joined from apartment (returned by list endpoint)
+  apartment_number?: number;
+  floor?: number;
 }
 
 export interface PaymentStatus {
