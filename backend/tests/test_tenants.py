@@ -101,3 +101,50 @@ def test_import_error_message_includes_tenant_name(tmp_path):
         files={"file": ("tenants.xlsx", buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
     )
     assert response.status_code in [400, 404]
+
+
+# --- Integration tests: Excel import with real-world format ---
+
+@pytest.fixture
+def building_id():
+    """Create a building and return its ID. Uses module-level client."""
+    import uuid
+    unique_name = f"Test Building {uuid.uuid4().hex[:8]}"
+    response = client.post("/api/v1/buildings/", json={
+        "name": unique_name,
+        "address": "Test Address",
+        "city": "Test City"
+    })
+    assert response.status_code == 201, f"Failed to create building: {response.json()}"
+    return response.json()["id"]
+
+
+def test_import_strips_column_header_whitespace(building_id):
+    """Columns with trailing/leading spaces should still be mapped correctly.
+    This simulates the real 'דוח דיירים' Excel format which has trailing spaces in headers
+    and stores phone numbers as integers."""
+    import io
+    import pandas as pd
+
+    df = pd.DataFrame([{
+        'כתובת': 'משעול תפן 12 כרמיאל',   # extra col, ignored
+        'דירה ': 1,                          # trailing space in header
+        'קומה': 1,
+        'שם': 'בדיקה א',
+        'טלפון ': 523000001,                 # integer phone + trailing space in header
+        'דואל': None,
+        'ועד בית': None,                     # extra col, ignored
+        'סוג בעלות': 'משכיר',
+    }])
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False)
+    buf.seek(0)
+
+    response = client.post(
+        f"/api/v1/tenants/{building_id}/import",
+        files={"file": ("test.xlsx", buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    )
+    assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.json()}"
+    data = response.json()
+    assert data["imported_count"] == 1, f"Expected 1 imported, got: {data}"
+    assert not data["errors"], f"Expected no errors, got: {data['errors']}"

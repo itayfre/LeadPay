@@ -252,6 +252,8 @@ async def import_tenants_from_excel(
     try:
         contents = await file.read()
         df = pd.read_excel(io.BytesIO(contents))
+        # Strip leading/trailing whitespace from all column names (real Excel files have trailing spaces)
+        df.columns = df.columns.str.strip()
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -333,7 +335,11 @@ async def import_tenants_from_excel(
                 continue
 
             # Create tenant
-            phone = normalize_phone(row['phone']) if pd.notna(row.get('phone')) else None
+            phone_raw = row.get('phone')
+            if pd.notna(phone_raw):
+                phone = normalize_phone(str(phone_raw))  # coerce int/float to str first
+            else:
+                phone = None
             email = row.get('email') if pd.notna(row.get('email')) else None
 
             # Map optional bank columns
