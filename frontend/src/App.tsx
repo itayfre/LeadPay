@@ -14,6 +14,7 @@ import Messages from './pages/Messages';
 import Settings from './pages/Settings';
 import WhatsAppTemplates from './pages/WhatsAppTemplates';
 import Tenants from './pages/Tenants';
+import AllTenants from './pages/AllTenants';
 import Layout from './components/layout/Layout';
 
 const queryClient = new QueryClient({
@@ -114,6 +115,7 @@ function App() {
             <Route path="/settings" element={<Settings />} />
             <Route path="/whatsapp-templates" element={<WhatsAppTemplates />} />
             <Route path="/building/:buildingId/tenants" element={<Tenants />} />
+            <Route path="/tenants" element={<AllTenants />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

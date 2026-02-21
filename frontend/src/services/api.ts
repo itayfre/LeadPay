@@ -123,11 +123,14 @@ export const tenantsAPI = {
     return response.json();
   },
 
-  list: (buildingId: string) =>
-    fetchAPI<Tenant[]>(`/api/v1/tenants/?building_id=${buildingId}`),
+  list: (buildingId?: string) => {
+    const query = buildingId ? `?building_id=${buildingId}` : '';
+    return fetchAPI<Tenant[]>(`/api/v1/tenants/${query}`);
+  },
 
   create: (data: {
     apartment_id: string;
+    building_id: string;
     name: string;
     full_name?: string;
     ownership_type: string;

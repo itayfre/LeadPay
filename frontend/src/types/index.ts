@@ -15,6 +15,8 @@ export interface Building {
 export interface Tenant {
   id: string;
   apartment_id: string;
+  building_id: string;        // direct building FK
+  building_name?: string;     // joined from building (returned by list endpoint)
   name: string;
   full_name?: string;
   phone?: string;
