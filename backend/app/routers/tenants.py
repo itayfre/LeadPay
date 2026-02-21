@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from typing import List
 from uuid import UUID
 import pandas as pd
@@ -173,7 +174,7 @@ def update_tenant(
 
 @router.delete("/{tenant_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_tenant(tenant_id: UUID, db: Session = Depends(get_db)):
-    """Delete a tenant"""
+    """Delete a tenant, cleaning up soft references first."""
     db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not db_tenant:
         raise HTTPException(
@@ -181,19 +182,48 @@ def delete_tenant(tenant_id: UUID, db: Session = Depends(get_db)):
             detail=f"Tenant with id {tenant_id} not found"
         )
 
-    db.delete(db_tenant)
-    db.commit()
+    try:
+        # Nullify matched_tenant_id on transactions (soft reference)
+        db.execute(
+            text("UPDATE transactions SET matched_tenant_id = NULL WHERE matched_tenant_id = :tid"),
+            {"tid": str(tenant_id)}
+        )
+        # Delete related messages and name_mappings (hard references)
+        db.execute(
+            text("DELETE FROM messages WHERE tenant_id = :tid"),
+            {"tid": str(tenant_id)}
+        )
+        db.execute(
+            text("DELETE FROM name_mappings WHERE tenant_id = :tid"),
+            {"tid": str(tenant_id)}
+        )
+        db.delete(db_tenant)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"לא ניתן למחוק דייר זה. ייתכן שיש לו נתונים משויכים במערכת."
+        )
     return None
 
 
-@router.get("/{building_id}/apartments/{apt_number}")
-def get_or_create_apartment(
+@router.post("/{building_id}/apartments/resolve")
+def resolve_apartment(
     building_id: UUID,
-    apt_number: int,
-    floor: int = 0,
+    data: dict,
     db: Session = Depends(get_db)
 ):
     """Find or create an apartment by building + number. Returns apartment_id."""
+    apt_number = data.get("apt_number")
+    floor = data.get("floor", 0)
+
+    if apt_number is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="apt_number is required"
+        )
+
     building = db.query(Building).filter(Building.id == building_id).first()
     if not building:
         raise HTTPException(
@@ -273,7 +303,7 @@ async def import_tenants_from_excel(
     if missing_columns:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Missing required columns: {', '.join(missing_columns)}"
+            detail=f"חסרות עמודות נדרשות: {', '.join(missing_columns)}"
         )
 
     imported_count = 0
@@ -315,7 +345,16 @@ async def import_tenants_from_excel(
             }
             ownership_type = ownership_map.get(row['ownership_type'])
             if not ownership_type:
-                errors.append(f"Row {index + 1}: Invalid ownership type '{row['ownership_type']}'")
+                errors.append(f"שורה {index + 1}: סוג בעלות לא חוקי '{row['ownership_type']}'. ערכים חוקיים: בעלים, משכיר, שוכר")
+                continue
+
+            # Check for existing tenant with same name in this apartment
+            existing = db.query(Tenant).filter(
+                Tenant.apartment_id == apartment.id,
+                Tenant.name == row['name']
+            ).first()
+            if existing:
+                errors.append(f"שורה {index + 1}: דייר '{row['name']}' כבר קיים בדירה {int(row['apartment'])}")
                 continue
 
             # Create tenant

@@ -153,8 +153,12 @@ export const tenantsAPI = {
   delete: (tenantId: string) =>
     fetchAPI<void>(`/api/v1/tenants/${tenantId}`, { method: 'DELETE' }),
 
-  resolveApartment: (buildingId: string, aptNumber: number) =>
+  resolveApartment: (buildingId: string, aptNumber: number, floor = 0) =>
     fetchAPI<{ apartment_id: string; apartment_number: number; floor: number }>(
-      `/api/v1/tenants/${buildingId}/apartments/${aptNumber}`
+      `/api/v1/tenants/${buildingId}/apartments/resolve`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ apt_number: aptNumber, floor }),
+      }
     ),
 };
