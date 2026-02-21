@@ -65,22 +65,69 @@ def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
     return db_tenant
 
 
-@router.get("/", response_model=List[TenantResponse])
+@router.get("/", response_model=List[dict])
 def list_tenants(
     building_id: UUID = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db)
 ):
-    """Get all tenants, optionally filtered by building"""
-    query = db.query(Tenant)
-
+    """Get all tenants, optionally filtered by building, with apartment info."""
     if building_id:
-        # Filter tenants by building through apartment relationship
-        query = query.join(Apartment).filter(Apartment.building_id == building_id)
-
-    tenants = query.offset(skip).limit(limit).all()
-    return tenants
+        results = (
+            db.query(Tenant, Apartment)
+            .join(Apartment, Tenant.apartment_id == Apartment.id)
+            .filter(Apartment.building_id == building_id)
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": str(tenant.id),
+                "apartment_id": str(tenant.apartment_id),
+                "apartment_number": apartment.number,
+                "floor": apartment.floor,
+                "name": tenant.name,
+                "full_name": tenant.full_name,
+                "phone": tenant.phone,
+                "email": tenant.email,
+                "language": tenant.language.value if hasattr(tenant.language, 'value') else tenant.language,
+                "ownership_type": tenant.ownership_type.value if hasattr(tenant.ownership_type, 'value') else tenant.ownership_type,
+                "is_committee_member": tenant.is_committee_member,
+                "has_standing_order": tenant.has_standing_order,
+                "bank_name": tenant.bank_name,
+                "bank_account": tenant.bank_account,
+                "notes": tenant.notes,
+                "is_active": tenant.is_active,
+                "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
+                "updated_at": tenant.updated_at.isoformat() if tenant.updated_at else None,
+            }
+            for tenant, apartment in results
+        ]
+    else:
+        tenants = db.query(Tenant).offset(skip).limit(limit).all()
+        return [
+            {
+                "id": str(t.id),
+                "apartment_id": str(t.apartment_id),
+                "name": t.name,
+                "full_name": t.full_name,
+                "phone": t.phone,
+                "email": t.email,
+                "language": t.language.value if hasattr(t.language, 'value') else t.language,
+                "ownership_type": t.ownership_type.value if hasattr(t.ownership_type, 'value') else t.ownership_type,
+                "is_committee_member": t.is_committee_member,
+                "has_standing_order": t.has_standing_order,
+                "bank_name": t.bank_name,
+                "bank_account": t.bank_account,
+                "notes": t.notes,
+                "is_active": t.is_active,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+            }
+            for t in tenants
+        ]
 
 
 @router.get("/{tenant_id}", response_model=TenantResponse)
