@@ -46,10 +46,23 @@ def get_payment_status(
         ).first()
 
         if not latest_statement:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No bank statements found for this building"
-            )
+            # No bank statements yet - return empty payment data with current period
+            now = datetime.now()
+            return {
+                "building_id": str(building_id),
+                "building_name": building.name,
+                "period": f"{now.month:02d}/{now.year}",
+                "summary": {
+                    "total_tenants": 0,
+                    "paid": 0,
+                    "unpaid": 0,
+                    "total_expected": 0,
+                    "total_collected": 0,
+                    "collection_rate": "N/A",
+                    "amount_rate": "N/A"
+                },
+                "tenants": []
+            }
 
         month = latest_statement.period_month
         year = latest_statement.period_year

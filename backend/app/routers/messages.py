@@ -116,19 +116,20 @@ def generate_payment_reminders(
         )
 
         # Save message to database (as pending)
+        period_parts = payment_status['period'].split('/')
         db_message = Message(
             tenant_id=tenant_id,
             building_id=building_id,
             message_type=MessageType.REMINDER,
             message_text=message_text,
             delivery_status=DeliveryStatus.PENDING,
-            period_month=month or payment_status['period'].split('/')[0],
-            period_year=year or payment_status['period'].split('/')[1]
+            period_month=month or int(period_parts[0]),
+            period_year=year or int(period_parts[1])
         )
         db.add(db_message)
 
         messages.append({
-            'message_id': None,  # Will be set after commit
+            'db_message': db_message,
             'tenant_id': str(tenant_id),
             'tenant_name': tenant_data['tenant_name'],
             'apartment_number': tenant_data['apartment_number'],
@@ -140,15 +141,23 @@ def generate_payment_reminders(
             'message_preview': message_text[:100] + '...' if len(message_text) > 100 else message_text
         })
 
-    # Commit all messages
+    # Commit all messages to get their IDs
     db.commit()
+
+    # Update message_id now that IDs are available
+    result_messages = []
+    for msg in messages:
+        db_msg = msg.pop('db_message')
+        db.refresh(db_msg)
+        msg['message_id'] = str(db_msg.id)
+        result_messages.append(msg)
 
     return {
         'building_id': str(building_id),
         'building_name': building.name,
         'period': payment_status['period'],
-        'total_messages': len(messages),
-        'messages': messages,
+        'total_messages': len(result_messages),
+        'messages': result_messages,
         'instructions': 'Click on the whatsapp_link to open WhatsApp Web with pre-filled message. You just need to click Send!'
     }
 

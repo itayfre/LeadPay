@@ -13,6 +13,7 @@ export default function Map() {
   const navigate = useNavigate();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
+  const markersRef = useRef<mapboxgl.Marker[]>([]);
   const [mapReady, setMapReady] = useState(false);
 
   const { data: buildings, isLoading } = useQuery({
@@ -45,6 +46,10 @@ export default function Map() {
   // Add markers for buildings
   useEffect(() => {
     if (!map.current || !mapReady || !buildings || buildings.length === 0) return;
+
+    // Remove old markers
+    markersRef.current.forEach((marker) => marker.remove());
+    markersRef.current = [];
 
     // For demo purposes, we'll use Tel Aviv coordinates since buildings don't have lat/long
     // In production, you'd need to geocode the addresses
@@ -80,11 +85,18 @@ export default function Map() {
         navigate(`/building/${building.id}`);
       });
 
-      new mapboxgl.Marker(el)
+      const marker = new mapboxgl.Marker(el)
         .setLngLat([coords[0], coords[1]])
         .setPopup(popup)
         .addTo(map.current!);
+
+      markersRef.current.push(marker);
     });
+
+    return () => {
+      markersRef.current.forEach((marker) => marker.remove());
+      markersRef.current = [];
+    };
   }, [mapReady, buildings, navigate]);
 
   if (!MAPBOX_TOKEN) {

@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import Layout from '../components/layout/Layout';
 import TenantImport from '../components/TenantImport';
 import { paymentsAPI, buildingsAPI, messagesAPI } from '../services/api';
-import type { PaymentStatusResponse, WhatsAppMessage } from '../types';
+import type { WhatsAppMessage } from '../types';
 
 export default function Dashboard() {
   const { t } = useTranslation();
@@ -27,7 +27,7 @@ export default function Dashboard() {
   });
 
   // Fetch payment status
-  const { data: paymentStatus, isLoading, error, refetch } = useQuery({
+  const { data: paymentStatus, isLoading, error } = useQuery({
     queryKey: ['paymentStatus', buildingId, selectedMonth, selectedYear],
     queryFn: () => paymentsAPI.getStatus(buildingId!, selectedMonth, selectedYear),
     enabled: !!buildingId,
@@ -78,14 +78,18 @@ export default function Dashboard() {
     );
   }
 
-  const stats = paymentStatus?.summary_statistics || {
+  const summary = paymentStatus?.summary || {
     total_tenants: 0,
-    paid_count: 0,
-    unpaid_count: 0,
+    paid: 0,
+    unpaid: 0,
     total_expected: 0,
     total_collected: 0,
-    collection_rate: 0,
+    collection_rate: '0%',
+    amount_rate: '0%',
   };
+  const collectionRateNum = typeof summary.collection_rate === 'string'
+    ? parseFloat(summary.collection_rate)
+    : summary.collection_rate;
 
   return (
     <Layout>
@@ -139,7 +143,7 @@ export default function Dashboard() {
             onChange={(e) => setSelectedYear(Number(e.target.value))}
             className="border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
-            {[2024, 2025, 2026].map((year) => (
+            {Array.from({ length: 3 }, (_, i) => new Date().getFullYear() - 1 + i).map((year) => (
               <option key={year} value={year}>
                 {year}
               </option>
@@ -148,7 +152,7 @@ export default function Dashboard() {
         </div>
 
         {/* Show tenant import if no tenants */}
-        {stats.total_tenants === 0 ? (
+        {summary.total_tenants === 0 ? (
           <TenantImport buildingId={buildingId} buildingName={building?.name || 'הבניין'} />
         ) : (
           <>
@@ -156,27 +160,27 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard
                 title={t('dashboard.paid')}
-                value={stats.paid_count}
-                total={stats.total_tenants}
+                value={summary.paid}
+                total={summary.total_tenants}
                 color="green"
                 icon="✅"
               />
               <StatCard
                 title={t('dashboard.unpaid')}
-                value={stats.unpaid_count}
-                total={stats.total_tenants}
+                value={summary.unpaid}
+                total={summary.total_tenants}
                 color="red"
                 icon="❌"
               />
               <StatCard
                 title={t('dashboard.totalExpected')}
-                value={`₪${stats.total_expected.toLocaleString()}`}
+                value={`₪${summary.total_expected.toLocaleString()}`}
                 color="blue"
                 icon="💰"
               />
               <StatCard
                 title={t('dashboard.collectionRate')}
-                value={`${Math.round(stats.collection_rate * 100)}%`}
+                value={`${Math.round(collectionRateNum)}%`}
                 color="purple"
                 icon="📊"
               />
@@ -209,8 +213,8 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {paymentStatus?.tenant_payments && paymentStatus.tenant_payments.length > 0 ? (
-                  paymentStatus.tenant_payments.map((payment) => (
+                {paymentStatus?.tenants && paymentStatus.tenants.length > 0 ? (
+                  paymentStatus.tenants.map((payment) => (
                     <tr key={payment.tenant_id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         {payment.apartment_number}
@@ -227,20 +231,26 @@ export default function Dashboard() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
                           className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            payment.is_paid
+                            payment.status === 'paid'
                               ? 'bg-green-100 text-green-800'
                               : 'bg-red-100 text-red-800'
                           }`}
                         >
-                          {payment.is_paid ? '✅ ' + t('dashboard.paid') : '❌ ' + t('dashboard.unpaid')}
+                          {payment.status === 'paid' ? '✅ ' + t('dashboard.paid') : '❌ ' + t('dashboard.unpaid')}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        {!payment.is_paid && payment.phone_number && (
+                        {payment.status !== 'paid' && payment.phone && (
                           <button
                             onClick={async () => {
-                              const response = await messagesAPI.generateReminders(buildingId, true);
-                              const tenantMessage = response.messages.find(
+                              // Use cached messages if available, otherwise generate once
+                              let msgs = whatsappMessages;
+                              if (msgs.length === 0) {
+                                const response = await messagesAPI.generateReminders(buildingId, true);
+                                msgs = response.messages;
+                                setWhatsappMessages(msgs);
+                              }
+                              const tenantMessage = msgs.find(
                                 (m) => m.tenant_id === payment.tenant_id
                               );
                               if (tenantMessage) {
@@ -324,12 +334,15 @@ function WhatsAppModal({ messages, onClose }: WhatsAppModalProps) {
 
   const handleSendMessage = async (message: WhatsAppMessage) => {
     window.open(message.whatsapp_link, '_blank');
-    setSentMessages((prev) => new Set(prev).add(message.id));
+    const msgId = message.message_id || message.tenant_id;
+    setSentMessages((prev) => new Set(prev).add(msgId));
 
-    try {
-      await messagesAPI.markSent(message.id);
-    } catch (err) {
-      console.error('Failed to mark message as sent:', err);
+    if (message.message_id) {
+      try {
+        await messagesAPI.markSent(message.message_id);
+      } catch (err) {
+        console.error('Failed to mark message as sent:', err);
+      }
     }
   };
 
@@ -352,33 +365,36 @@ function WhatsAppModal({ messages, onClose }: WhatsAppModalProps) {
         </div>
 
         <div className="overflow-y-auto max-h-[60vh] p-6 space-y-4">
-          {messages.map((message) => (
+          {messages.map((message) => {
+            const msgId = message.message_id || message.tenant_id;
+            return (
             <div
-              key={message.id}
+              key={msgId}
               className="border border-gray-200 rounded-lg p-4 hover:border-green-300 transition-colors"
             >
               <div className="flex justify-between items-start mb-3">
                 <div>
                   <p className="font-medium text-gray-900">{message.tenant_name}</p>
-                  <p className="text-sm text-gray-500">{message.phone_number}</p>
+                  <p className="text-sm text-gray-500">{message.phone}</p>
                 </div>
                 <button
                   onClick={() => handleSendMessage(message)}
-                  disabled={sentMessages.has(message.id)}
+                  disabled={sentMessages.has(msgId)}
                   className={`px-4 py-2 rounded-md font-medium transition-colors ${
-                    sentMessages.has(message.id)
+                    sentMessages.has(msgId)
                       ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                       : 'bg-green-600 text-white hover:bg-green-700'
                   }`}
                 >
-                  {sentMessages.has(message.id) ? `✓ ${t('whatsapp.sent')}` : `📱 ${t('whatsapp.click')}`}
+                  {sentMessages.has(msgId) ? `✓ ${t('whatsapp.sent')}` : `📱 ${t('whatsapp.click')}`}
                 </button>
               </div>
               <div className="bg-gray-50 rounded p-3 text-sm text-gray-700 whitespace-pre-wrap" dir="auto">
-                {message.message_text}
+                {message.message_preview}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

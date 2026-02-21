@@ -1,11 +1,9 @@
 import { useState } from 'react';
-import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import Layout from '../components/layout/Layout';
 import { buildingsAPI, statementsAPI } from '../services/api';
 
 export default function StatementsUpload() {
-  const { t } = useTranslation();
   const [selectedBuilding, setSelectedBuilding] = useState<string>('');
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
