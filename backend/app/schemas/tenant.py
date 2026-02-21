@@ -15,6 +15,8 @@ class TenantBase(BaseModel):
     ownership_type: OwnershipType
     is_committee_member: bool = False
     has_standing_order: bool = False
+    bank_name: Optional[str] = None
+    bank_account: Optional[str] = None
     notes: Optional[str] = None
     is_active: bool = True
 
@@ -32,6 +34,8 @@ class TenantUpdate(BaseModel):
     ownership_type: Optional[OwnershipType] = None
     is_committee_member: Optional[bool] = None
     has_standing_order: Optional[bool] = None
+    bank_name: Optional[str] = None
+    bank_account: Optional[str] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
 

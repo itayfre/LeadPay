@@ -32,6 +32,8 @@ class Tenant(Base):
     ownership_type = Column(SQLEnum(OwnershipType), nullable=False)
     is_committee_member = Column(Boolean, default=False)
     has_standing_order = Column(Boolean, default=False)
+    bank_name = Column(String, nullable=True, comment="Bank name for payment matching")
+    bank_account = Column(String, nullable=True, comment="Bank account number")
     notes = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
