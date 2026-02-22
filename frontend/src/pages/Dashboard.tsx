@@ -86,9 +86,7 @@ export default function Dashboard() {
     collection_rate: '0%',
     amount_rate: '0%',
   };
-  const collectionRateNum = typeof summary.collection_rate === 'string'
-    ? parseFloat(summary.collection_rate)
-    : summary.collection_rate;
+  const collectionRateNum = parseFloat(summary.collection_rate) || 0;
 
   return (
     <Layout>
