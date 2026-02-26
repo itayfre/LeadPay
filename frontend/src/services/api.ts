@@ -27,7 +27,7 @@ export const buildingsAPI = {
   get: (id: string) => fetchAPI<Building>(`/api/v1/buildings/${id}`),
 
   create: (data: Omit<Building, 'id' | 'created_at' | 'updated_at'>) =>
-    fetchAPI<Building>('/api/v1/buildings', {
+    fetchAPI<Building>('/api/v1/buildings/', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
