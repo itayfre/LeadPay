@@ -49,18 +49,24 @@ def _building_with_live_count(building: Building, db: Session) -> dict:
         .scalar() or 0
     )
 
-    # Sum each active tenant's effective expected payment:
-    # use apartment.expected_payment if set, else building.expected_monthly_payment
+    # Sum expected payment per APARTMENT (not per tenant) to avoid double-counting
+    # apartments that have multiple active tenants (e.g., owner + renter).
     building_default = float(building.expected_monthly_payment or 0)
-    tenant_apt_pairs = (
-        db.query(Tenant, Apartment)
-        .join(Apartment, Tenant.apartment_id == Apartment.id)
+    active_apt_ids = (
+        db.query(Apartment.id)
+        .join(Tenant, Tenant.apartment_id == Apartment.id)
         .filter(Apartment.building_id == building.id, Tenant.is_active == True)
+        .distinct()
+        .subquery()
+    )
+    apartments_with_active_tenants = (
+        db.query(Apartment)
+        .filter(Apartment.id.in_(active_apt_ids))
         .all()
     )
     total_expected_monthly = sum(
         float(apt.expected_payment) if apt.expected_payment is not None else building_default
-        for _, apt in tenant_apt_pairs
+        for apt in apartments_with_active_tenants
     )
 
     return {
