@@ -165,3 +165,15 @@ export const tenantsAPI = {
       }
     ),
 };
+
+// Apartments API
+export const apartmentsAPI = {
+  patch: (apartmentId: string, data: { expected_payment: number | null }) =>
+    fetchAPI<{ apartment_id: string; expected_payment: number | null }>(
+      `/api/v1/tenants/apartments/${apartmentId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }
+    ),
+};

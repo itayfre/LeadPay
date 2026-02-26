@@ -34,6 +34,8 @@ export interface Tenant {
   // Joined from apartment (returned by list endpoint)
   apartment_number?: number;
   floor?: number;
+  expected_payment?: number | null;           // per-apartment override (null = not set)
+  building_expected_payment?: number | null;  // building default (for display fallback)
 }
 
 export interface PaymentStatus {
