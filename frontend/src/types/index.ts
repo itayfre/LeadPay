@@ -8,8 +8,18 @@ export interface Building {
   bank_account_number?: string;
   total_tenants: number;
   expected_monthly_payment?: number;
+  total_expected_monthly?: number;  // computed sum of active tenant expected payments
   created_at: string;
   updated_at: string;
+}
+
+export interface BuildingPaymentSummary {
+  building_id: string;
+  paid: number;
+  unpaid: number;
+  total_tenants: number;
+  collection_rate: number;      // 0–100
+  total_collected: number;
 }
 
 export interface Tenant {
