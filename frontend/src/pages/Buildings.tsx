@@ -66,7 +66,7 @@ export default function Buildings() {
   };
 
   const handleCreate = async (data: Partial<Building>) => {
-    await buildingsAPI.create(data as any);
+    await buildingsAPI.create(data as Omit<Building, 'id' | 'created_at' | 'updated_at'>);
     queryClient.invalidateQueries({ queryKey: ['buildings'] });
   };
 
@@ -78,13 +78,13 @@ export default function Buildings() {
       if (!b.name.toLowerCase().includes(q) && !b.address.toLowerCase().includes(q)) return false;
     }
     if (filterCity && b.city !== filterCity) return false;
-    const t = b.total_tenants || 0;
-    if (filterSize === 'small' && !(t >= 1 && t <= 5)) return false;
-    if (filterSize === 'medium' && !(t >= 6 && t <= 15)) return false;
-    if (filterSize === 'large' && !(t >= 16)) return false;
+    const tenantCount = b.total_tenants || 0;
+    if (filterSize === 'small' && !(tenantCount >= 1 && tenantCount <= 5)) return false;
+    if (filterSize === 'medium' && !(tenantCount >= 6 && tenantCount <= 15)) return false;
+    if (filterSize === 'large' && !(tenantCount >= 16)) return false;
     if (filterStatus) {
       const s = summaryMap[b.id];
-      if (!s) return filterStatus === '';
+      if (!s) return filterStatus === 'none_paid';
       if (filterStatus === 'all_paid' && s.collection_rate < 100) return false;
       if (filterStatus === 'partial' && (s.collection_rate === 0 || s.collection_rate >= 100)) return false;
       if (filterStatus === 'none_paid' && s.collection_rate > 0) return false;
