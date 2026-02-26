@@ -41,13 +41,28 @@ def create_building(building: BuildingCreate, db: Session = Depends(get_db)):
 
 
 def _building_with_live_count(building: Building, db: Session) -> dict:
-    """Serialize a Building with a live tenant count from the DB."""
+    """Serialize a Building with live tenant count and computed expected monthly total."""
     count = (
         db.query(func.count(Tenant.id))
         .join(Apartment, Tenant.apartment_id == Apartment.id)
         .filter(Apartment.building_id == building.id)
         .scalar() or 0
     )
+
+    # Sum each active tenant's effective expected payment:
+    # use apartment.expected_payment if set, else building.expected_monthly_payment
+    building_default = float(building.expected_monthly_payment or 0)
+    tenant_apt_pairs = (
+        db.query(Tenant, Apartment)
+        .join(Apartment, Tenant.apartment_id == Apartment.id)
+        .filter(Apartment.building_id == building.id, Tenant.is_active == True)
+        .all()
+    )
+    total_expected_monthly = sum(
+        float(apt.expected_payment) if apt.expected_payment is not None else building_default
+        for _, apt in tenant_apt_pairs
+    )
+
     return {
         "id": str(building.id),
         "name": building.name,
@@ -56,6 +71,7 @@ def _building_with_live_count(building: Building, db: Session) -> dict:
         "bank_account_number": building.bank_account_number,
         "total_tenants": count,
         "expected_monthly_payment": float(building.expected_monthly_payment) if building.expected_monthly_payment else None,
+        "total_expected_monthly": total_expected_monthly,
         "created_at": building.created_at.isoformat() if building.created_at else None,
         "updated_at": building.updated_at.isoformat() if building.updated_at else None,
     }
