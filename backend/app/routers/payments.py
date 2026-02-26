@@ -17,6 +17,96 @@ router = APIRouter(
 )
 
 
+
+@router.get("/bulk-summary")
+def get_bulk_payment_summary(
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Return payment summary for ALL buildings for a given month/year.
+    Uses grouped queries — no N+1 problem.
+    Falls back to current month/year if not specified.
+    """
+    from datetime import datetime as dt
+    if not month or not year:
+        now = dt.now()
+        month = now.month
+        year = now.year
+
+    # Get all buildings
+    buildings = db.query(Building).all()
+    if not buildings:
+        return []
+
+    building_ids = [b.id for b in buildings]
+
+    # Get active tenant counts per building (one query)
+    tenant_counts = dict(
+        db.query(Apartment.building_id, func.count(Tenant.id))
+        .join(Tenant, Tenant.apartment_id == Apartment.id)
+        .filter(
+            Apartment.building_id.in_(building_ids),
+            Tenant.is_active == True
+        )
+        .group_by(Apartment.building_id)
+        .all()
+    )
+
+    # Get paid tenant IDs and amounts per building for the period (one query)
+    paid_rows = (
+        db.query(
+            Building.id.label("building_id"),
+            Transaction.matched_tenant_id,
+            func.sum(Transaction.credit_amount).label("total_paid")
+        )
+        .join(BankStatement, BankStatement.building_id == Building.id)
+        .join(Transaction, Transaction.statement_id == BankStatement.id)
+        .filter(
+            BankStatement.period_month == month,
+            BankStatement.period_year == year,
+            Transaction.transaction_type == TransactionType.PAYMENT,
+            Transaction.matched_tenant_id != None,
+            Transaction.credit_amount != None,
+        )
+        .group_by(Building.id, Transaction.matched_tenant_id)
+        .all()
+    )
+
+    # Aggregate per building
+    paid_by_building: dict = {}
+    collected_by_building: dict = {}
+    for row in paid_rows:
+        bid = str(row.building_id)
+        if bid not in paid_by_building:
+            paid_by_building[bid] = set()
+            collected_by_building[bid] = 0.0
+        paid_by_building[bid].add(str(row.matched_tenant_id))
+        collected_by_building[bid] += float(row.total_paid or 0)
+
+    # Build result
+    result = []
+    for building in buildings:
+        bid = str(building.id)
+        total = tenant_counts.get(building.id, 0)
+        paid_set = paid_by_building.get(bid, set())
+        paid = len(paid_set)
+        unpaid = max(0, total - paid)
+        collected = collected_by_building.get(bid, 0.0)
+        collection_rate = round(paid / total * 100, 1) if total > 0 else 0.0
+
+        result.append({
+            "building_id": bid,
+            "paid": paid,
+            "unpaid": unpaid,
+            "total_tenants": total,
+            "collection_rate": collection_rate,
+            "total_collected": collected,
+        })
+
+    return result
+
 @router.get("/{building_id}/status")
 def get_payment_status(
     building_id: UUID,
