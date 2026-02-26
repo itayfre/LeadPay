@@ -230,6 +230,7 @@ export default function Buildings() {
               <BuildingCard
                 key={building.id}
                 building={building}
+                summary={summaryMap[building.id]}
                 onClick={() => {
                   if ((building.total_tenants || 0) === 0) {
                     navigate(`/building/${building.id}/tenants`);
@@ -313,12 +314,13 @@ export default function Buildings() {
 
 interface BuildingCardProps {
   building: Building;
+  summary?: BuildingPaymentSummary;
   onClick: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }
 
-function BuildingCard({ building, onClick, onEdit, onDelete }: BuildingCardProps) {
+function BuildingCard({ building, summary, onClick, onEdit, onDelete }: BuildingCardProps) {
   const [showEditMenu, setShowEditMenu] = useState(false);
 
   const handleMenuToggle = (e: React.MouseEvent) => {
@@ -416,10 +418,38 @@ function BuildingCard({ building, onClick, onEdit, onDelete }: BuildingCardProps
                 <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">חודשי</p>
               </div>
               <p className="text-2xl font-bold text-green-900">
-                {building.expected_monthly_payment ? `₪${building.expected_monthly_payment.toLocaleString()}` : '—'}
+                {building.total_expected_monthly
+                  ? `₪${Math.round(building.total_expected_monthly).toLocaleString()}`
+                  : building.expected_monthly_payment
+                  ? `₪${building.expected_monthly_payment.toLocaleString()}`
+                  : '—'}
               </p>
             </div>
           </div>
+        </div>
+
+        {/* Payment Status Section */}
+        <div className="px-6 pb-4">
+          {summary && summary.total_tenants > 0 ? (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-green-700 font-medium">✅ {summary.paid} שילמו</span>
+                <span className="text-red-600 font-medium">❌ {summary.unpaid} לא שילמו</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full transition-all ${
+                    summary.collection_rate === 100 ? 'bg-green-500' :
+                    summary.collection_rate > 50 ? 'bg-yellow-500' : 'bg-red-500'
+                  }`}
+                  style={{ width: `${summary.collection_rate}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-500 text-left">{summary.collection_rate.toFixed(0)}% גבייה</p>
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400 text-center py-1">אין נתונים לתקופה זו</p>
+          )}
         </div>
 
         {/* Card Footer */}
