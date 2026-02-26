@@ -60,7 +60,7 @@ export default function BuildingEditModal({
       await onSave(data);
       onCancel();
     } catch (err) {
-      setError((err as Error).message);
+      setError(err instanceof Error ? err.message : 'שגיאה לא ידועה');
     } finally {
       setSaving(false);
     }
@@ -92,36 +92,36 @@ export default function BuildingEditModal({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="md:col-span-2">
-              <label className="block text-sm font-semibold text-gray-700 mb-2">שם הבניין *</label>
-              <input type="text" required value={formData.name}
+              <label htmlFor="building-name" className="block text-sm font-semibold text-gray-700 mb-2">שם הבניין *</label>
+              <input id="building-name" type="text" required value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
                 placeholder="למשל: בניין משעול תפן 12" />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">כתובת *</label>
-              <input type="text" required value={formData.address}
+              <label htmlFor="building-address" className="block text-sm font-semibold text-gray-700 mb-2">כתובת *</label>
+              <input id="building-address" type="text" required value={formData.address}
                 onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                 className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
                 placeholder="משעול תפן 12" />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">עיר *</label>
-              <input type="text" required value={formData.city}
+              <label htmlFor="building-city" className="block text-sm font-semibold text-gray-700 mb-2">עיר *</label>
+              <input id="building-city" type="text" required value={formData.city}
                 onChange={(e) => setFormData({ ...formData, city: e.target.value })}
                 className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
                 placeholder="תל אביב" />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">מספר חשבון בנק</label>
-              <input type="text" value={formData.bank_account_number}
+              <label htmlFor="building-bank" className="block text-sm font-semibold text-gray-700 mb-2">מספר חשבון בנק</label>
+              <input id="building-bank" type="text" value={formData.bank_account_number}
                 onChange={(e) => setFormData({ ...formData, bank_account_number: e.target.value })}
                 className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
                 placeholder="123456789" />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">תשלום חודשי ברירת מחדל (₪)</label>
-              <input type="number" step="0.01" value={formData.expected_monthly_payment}
+              <label htmlFor="building-payment" className="block text-sm font-semibold text-gray-700 mb-2">תשלום חודשי ברירת מחדל (₪)</label>
+              <input id="building-payment" type="number" step="0.01" value={formData.expected_monthly_payment}
                 onChange={(e) => setFormData({ ...formData, expected_monthly_payment: e.target.value })}
                 className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
                 placeholder="500.00" />
