@@ -445,7 +445,7 @@ function BuildingCard({ building, summary, onClick, onEdit, onDelete }: Building
                   style={{ width: `${summary.collection_rate}%` }}
                 />
               </div>
-              <p className="text-xs text-gray-500 text-left">{summary.collection_rate.toFixed(0)}% גבייה</p>
+              <p className="text-xs text-gray-500 text-start">{(summary.collection_rate ?? 0).toFixed(0)}% גבייה</p>
             </div>
           ) : (
             <p className="text-xs text-gray-400 text-center py-1">אין נתונים לתקופה זו</p>
