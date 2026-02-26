@@ -27,7 +27,7 @@ class Transaction(Base):
     __tablename__ = "transactions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    statement_id = Column(UUID(as_uuid=True), ForeignKey("bank_statements.id"), nullable=False)
+    statement_id = Column(UUID(as_uuid=True), ForeignKey("bank_statements.id"), nullable=True)
     activity_date = Column(DateTime, nullable=False)
     reference_number = Column(String, nullable=True)
     description = Column(String, nullable=False, comment="Original Hebrew text from bank")
@@ -39,6 +39,8 @@ class Transaction(Base):
     match_confidence = Column(Float, nullable=True, comment="Confidence score 0-1")
     match_method = Column(SQLEnum(MatchMethod, values_callable=lambda x: [e.value for e in x]), nullable=True)
     is_confirmed = Column(Boolean, default=False, comment="User verified this match")
+    is_manual = Column(Boolean, default=False, nullable=False, server_default='false',
+                       comment="True if entered manually (not from bank statement)")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
