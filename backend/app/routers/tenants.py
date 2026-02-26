@@ -87,6 +87,8 @@ def list_tenants(
             "building_name": building.name,
             "apartment_number": apartment.number,
             "floor": apartment.floor,
+            "expected_payment": float(apartment.expected_payment) if apartment.expected_payment is not None else None,
+            "building_expected_payment": float(building.expected_monthly_payment) if building.expected_monthly_payment is not None else None,
             "name": tenant.name,
             "full_name": tenant.full_name,
             "phone": tenant.phone,
