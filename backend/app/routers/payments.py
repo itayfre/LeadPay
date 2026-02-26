@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, and_
 from typing import List, Optional
@@ -9,7 +10,7 @@ from collections import defaultdict
 from ..database import get_db
 from ..models import (
     Building, Apartment, Tenant, Transaction,
-    BankStatement, TransactionType
+    BankStatement, TransactionType, MatchMethod
 )
 
 router = APIRouter(
@@ -140,6 +141,72 @@ def _calculate_tenant_debt_from_map(
         for y, m in months
     )
     return round(total_debt, 2)
+
+
+
+class ManualPaymentRequest(BaseModel):
+    building_id: str
+    tenant_id: str
+    amount: float
+    month: int
+    year: int
+    note: Optional[str] = None
+
+
+@router.post("/manual")
+def create_manual_payment(
+    payload: ManualPaymentRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Record a manual payment for a tenant (cash, bank transfer outside normal matching).
+    Creates a Transaction with is_manual=True and statement_id=None.
+    """
+    from datetime import date
+
+    # Validate tenant exists
+    tenant = db.query(Tenant).filter(Tenant.id == payload.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail=f"Tenant {payload.tenant_id} not found")
+
+    # Validate amount
+    if payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+
+    # Build description
+    description = "תשלום ידני"
+    if payload.note:
+        description += f" - {payload.note}"
+
+    # Create transaction (no statement_id — is_manual=True)
+    txn = Transaction(
+        statement_id=None,
+        activity_date=date(payload.year, payload.month, 1),
+        description=description,
+        credit_amount=payload.amount,
+        debit_amount=None,
+        balance=None,
+        transaction_type=TransactionType.PAYMENT,
+        matched_tenant_id=tenant.id,
+        match_confidence=1.0,
+        match_method=MatchMethod.MANUAL,
+        is_confirmed=True,
+        is_manual=True,
+    )
+    db.add(txn)
+    db.commit()
+    db.refresh(txn)
+
+    return {
+        "transaction_id": str(txn.id),
+        "tenant_id": str(tenant.id),
+        "tenant_name": tenant.name,
+        "amount": float(txn.credit_amount),
+        "month": payload.month,
+        "year": payload.year,
+        "description": description,
+        "is_manual": True,
+    }
 
 
 @router.get("/{building_id}/status")
