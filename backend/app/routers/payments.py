@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_, and_
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
@@ -110,6 +110,55 @@ def get_bulk_payment_summary(
 
     return result
 
+
+def _calculate_tenant_debt(tenant, apartment, building, db, up_to_month: int, up_to_year: int) -> float:
+    """Cumulative debt from move_in_date to up_to_month/year inclusive."""
+    move_in = tenant.move_in_date
+    expected_monthly = float(apartment.expected_payment or building.expected_monthly_payment or 0)
+    if expected_monthly == 0:
+        return 0.0
+
+    # All months from move_in to up_to
+    months = []
+    y, m = move_in.year, move_in.month
+    while (y, m) <= (up_to_year, up_to_month):
+        months.append((y, m))
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    if not months:
+        return 0.0
+
+    # Get all matched payments for this tenant (bank-statement + manual)
+    all_transactions = (
+        db.query(Transaction, BankStatement)
+        .outerjoin(BankStatement, Transaction.statement_id == BankStatement.id)
+        .filter(
+            Transaction.matched_tenant_id == tenant.id,
+            Transaction.transaction_type == TransactionType.PAYMENT,
+            Transaction.credit_amount != None,
+        )
+        .all()
+    )
+
+    # Build paid_map: (year, month) -> total paid
+    paid_map = {}
+    for txn, stmt in all_transactions:
+        if stmt is not None:
+            key = (stmt.period_year, stmt.period_month)
+        else:
+            # manual transaction: derive month from activity_date
+            key = (txn.activity_date.year, txn.activity_date.month)
+        paid_map[key] = paid_map.get(key, 0.0) + float(txn.credit_amount or 0)
+
+    total_debt = sum(
+        max(0.0, expected_monthly - paid_map.get((y, m), 0.0))
+        for y, m in months
+    )
+    return round(total_debt, 2)
+
+
 @router.get("/{building_id}/status")
 def get_payment_status(
     building_id: UUID,
@@ -166,13 +215,31 @@ def get_payment_status(
         Tenant.is_active == True
     ).all()
 
-    # Get all transactions for this period
-    transactions = db.query(Transaction).join(BankStatement).filter(
-        BankStatement.building_id == building_id,
-        BankStatement.period_month == month,
-        BankStatement.period_year == year,
-        Transaction.transaction_type == TransactionType.PAYMENT
-    ).all()
+    # Get tenant IDs for this building to scope manual transactions
+    tenant_ids_in_building = [t.id for t, _ in tenants_query]
+
+    # Get all transactions for this period (including manual transactions)
+    transactions = (
+        db.query(Transaction)
+        .outerjoin(BankStatement, Transaction.statement_id == BankStatement.id)
+        .filter(
+            Transaction.transaction_type == TransactionType.PAYMENT,
+            Transaction.matched_tenant_id.in_(tenant_ids_in_building),
+            or_(
+                and_(
+                    BankStatement.period_month == month,
+                    BankStatement.period_year == year,
+                    BankStatement.building_id == building_id,
+                ),
+                and_(
+                    Transaction.is_manual == True,
+                    func.extract('month', Transaction.activity_date) == month,
+                    func.extract('year', Transaction.activity_date) == year,
+                )
+            )
+        )
+        .all()
+    )
 
     # Create a map of tenant_id -> total paid
     payments_by_tenant = {}
@@ -227,7 +294,10 @@ def get_payment_status(
             "is_overpaid": difference > 1.0,
             "is_underpaid": difference < -1.0,
             "phone": tenant.phone,
-            "language": tenant.language.value if tenant.language else "he"
+            "language": tenant.language.value if tenant.language else "he",
+            "apartment_id": str(apartment.id),
+            "move_in_date": tenant.move_in_date.isoformat() if tenant.move_in_date else None,
+            "total_debt": _calculate_tenant_debt(tenant, apartment, building, db, month, year) if tenant.move_in_date else 0.0,
         })
 
     # Sort by apartment number
