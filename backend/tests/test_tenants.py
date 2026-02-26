@@ -148,3 +148,24 @@ def test_import_strips_column_header_whitespace(building_id):
     data = response.json()
     assert data["imported_count"] == 1, f"Expected 1 imported, got: {data}"
     assert not data["errors"], f"Expected no errors, got: {data['errors']}"
+
+
+def test_patch_apartment_expected_payment(building_id):
+    """Can set and clear apartment expected_payment."""
+    # First create an apartment via resolve
+    resp = client.post(
+        f"/api/v1/tenants/{building_id}/apartments/resolve",
+        json={"apt_number": 99, "floor": 1}
+    )
+    assert resp.status_code == 200
+    apt_id = resp.json()["apartment_id"]
+
+    # Set expected_payment
+    resp = client.patch(f"/api/v1/tenants/apartments/{apt_id}", json={"expected_payment": 750.0})
+    assert resp.status_code == 200
+    assert resp.json()["expected_payment"] == 750.0
+
+    # Clear expected_payment (set to null)
+    resp = client.patch(f"/api/v1/tenants/apartments/{apt_id}", json={"expected_payment": None})
+    assert resp.status_code == 200
+    assert resp.json()["expected_payment"] is None

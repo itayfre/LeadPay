@@ -382,3 +382,26 @@ async def import_tenants_from_excel(
         "imported_count": imported_count,
         "errors": errors if errors else None
     }
+
+
+@router.patch("/apartments/{apartment_id}", status_code=status.HTTP_200_OK)
+def patch_apartment(
+    apartment_id: UUID,
+    data: dict,
+    db: Session = Depends(get_db)
+):
+    """Patch an apartment's expected_payment override. Pass null to clear override."""
+    apartment = db.query(Apartment).filter(Apartment.id == apartment_id).first()
+    if not apartment:
+        raise HTTPException(status_code=404, detail=f"Apartment {apartment_id} not found")
+
+    if "expected_payment" in data:
+        val = data["expected_payment"]
+        apartment.expected_payment = float(val) if val is not None else None
+
+    db.commit()
+    db.refresh(apartment)
+    return {
+        "apartment_id": str(apartment.id),
+        "expected_payment": float(apartment.expected_payment) if apartment.expected_payment is not None else None,
+    }
