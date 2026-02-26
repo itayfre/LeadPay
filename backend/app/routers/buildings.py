@@ -45,7 +45,7 @@ def _building_with_live_count(building: Building, db: Session) -> dict:
     count = (
         db.query(func.count(Tenant.id))
         .join(Apartment, Tenant.apartment_id == Apartment.id)
-        .filter(Apartment.building_id == building.id)
+        .filter(Apartment.building_id == building.id, Tenant.is_active == True)
         .scalar() or 0
     )
 
