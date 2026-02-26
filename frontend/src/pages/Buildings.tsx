@@ -3,8 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Layout from '../components/layout/Layout';
-import { buildingsAPI } from '../services/api';
-import type { Building } from '../types';
+import { buildingsAPI, paymentsAPI } from '../services/api';
+import type { Building, BuildingPaymentSummary } from '../types';
 import ConfirmDialog from '../components/modals/ConfirmDialog';
 import BuildingEditModal from '../components/modals/BuildingEditModal';
 
@@ -17,10 +17,28 @@ export default function Buildings() {
   const [buildingToEdit, setBuildingToEdit] = useState<Building | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const now = new Date();
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+  const [search, setSearch] = useState('');
+  const [filterCity, setFilterCity] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');   // '' | 'all_paid' | 'partial' | 'none_paid'
+  const [filterSize, setFilterSize] = useState('');       // '' | 'small' | 'medium' | 'large'
+  const [showAddModal, setShowAddModal] = useState(false);
+
   const { data: buildings, isLoading, error } = useQuery({
     queryKey: ['buildings'],
     queryFn: buildingsAPI.list,
   });
+
+  const { data: bulkSummary } = useQuery({
+    queryKey: ['bulkSummary', selectedMonth, selectedYear],
+    queryFn: () => paymentsAPI.getBulkSummary(selectedMonth, selectedYear),
+  });
+
+  const summaryMap: Record<string, BuildingPaymentSummary> = Object.fromEntries(
+    (bulkSummary || []).map(s => [s.building_id, s])
+  );
 
   const handleDelete = async () => {
     if (!buildingToDelete) return;
@@ -46,6 +64,33 @@ export default function Buildings() {
       throw err;
     }
   };
+
+  const handleCreate = async (data: Partial<Building>) => {
+    await buildingsAPI.create(data as any);
+    queryClient.invalidateQueries({ queryKey: ['buildings'] });
+  };
+
+  const cities = [...new Set((buildings || []).map((b: Building) => b.city).filter(Boolean))].sort();
+
+  const filteredBuildings = (buildings || []).filter((b: Building) => {
+    if (search) {
+      const q = search.toLowerCase();
+      if (!b.name.toLowerCase().includes(q) && !b.address.toLowerCase().includes(q)) return false;
+    }
+    if (filterCity && b.city !== filterCity) return false;
+    const t = b.total_tenants || 0;
+    if (filterSize === 'small' && !(t >= 1 && t <= 5)) return false;
+    if (filterSize === 'medium' && !(t >= 6 && t <= 15)) return false;
+    if (filterSize === 'large' && !(t >= 16)) return false;
+    if (filterStatus) {
+      const s = summaryMap[b.id];
+      if (!s) return filterStatus === '';
+      if (filterStatus === 'all_paid' && s.collection_rate < 100) return false;
+      if (filterStatus === 'partial' && (s.collection_rate === 0 || s.collection_rate >= 100)) return false;
+      if (filterStatus === 'none_paid' && s.collection_rate > 0) return false;
+    }
+    return true;
+  });
 
   if (isLoading) {
     return (
@@ -84,23 +129,104 @@ export default function Buildings() {
       <div className="space-y-8">
         {/* Header Section */}
         <div className="bg-gradient-to-r from-primary-600 to-primary-700 rounded-2xl shadow-lg p-8 text-white">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold mb-2">{t('nav.buildings')}</h1>
               <p className="text-primary-100 text-lg">
-                {buildings?.length || 0} {buildings?.length === 1 ? 'בניין' : 'בניינים'} במערכת
+                {filteredBuildings.length} {filteredBuildings.length === 1 ? 'בניין' : 'בניינים'}
+                {filteredBuildings.length !== (buildings?.length || 0) && ` (מתוך ${buildings?.length || 0})`}
               </p>
             </div>
-            <div className="bg-white/20 backdrop-blur-sm rounded-xl p-6">
-              <div className="text-5xl">🏢</div>
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Period selector */}
+              <select
+                value={selectedMonth}
+                onChange={e => setSelectedMonth(Number(e.target.value))}
+                className="bg-white/20 text-white border border-white/30 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-white/50"
+              >
+                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                  <option key={m} value={m} className="text-gray-900">
+                    {new Date(2024, m - 1).toLocaleString('he-IL', { month: 'long' })}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={selectedYear}
+                onChange={e => setSelectedYear(Number(e.target.value))}
+                className="bg-white/20 text-white border border-white/30 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-white/50"
+              >
+                {Array.from({ length: 3 }, (_, i) => new Date().getFullYear() - 1 + i).map(y => (
+                  <option key={y} value={y} className="text-gray-900">{y}</option>
+                ))}
+              </select>
+              {/* Add building button */}
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center gap-2 bg-white text-primary-700 font-semibold px-4 py-2 rounded-lg hover:bg-primary-50 transition-colors shadow-md"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                הוסף בניין
+              </button>
+              <div className="bg-white/20 backdrop-blur-sm rounded-xl p-4 hidden lg:block">
+                <div className="text-4xl">🏢</div>
+              </div>
             </div>
           </div>
         </div>
 
+        {/* Search + Filter Bar */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 space-y-3">
+          <div className="flex gap-3 flex-wrap">
+            <input
+              type="text"
+              placeholder="חיפוש לפי שם או כתובת..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="flex-1 min-w-48 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            />
+            <select
+              value={filterCity}
+              onChange={e => setFilterCity(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="">כל הערים</option>
+              {cities.map((c: string) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <span className="text-xs text-gray-500 self-center ml-1">גודל:</span>
+            {([
+              { v: '', l: 'הכל' },
+              { v: 'small', l: 'קטן (1–5)' },
+              { v: 'medium', l: 'בינוני (6–15)' },
+              { v: 'large', l: 'גדול (16+)' },
+            ] as { v: string; l: string }[]).map(({ v, l }) => (
+              <button key={v} onClick={() => setFilterSize(v)}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${filterSize === v ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                {l}
+              </button>
+            ))}
+            <span className="text-xs text-gray-500 self-center mr-3 ml-1">סטטוס:</span>
+            {([
+              { v: '', l: 'הכל' },
+              { v: 'all_paid', l: '✅ שילמו הכל' },
+              { v: 'partial', l: '⚠️ חלקי' },
+              { v: 'none_paid', l: '❌ לא שילמו' },
+            ] as { v: string; l: string }[]).map(({ v, l }) => (
+              <button key={v} onClick={() => setFilterStatus(v)}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${filterStatus === v ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Buildings Grid */}
-        {buildings && buildings.length > 0 ? (
+        {filteredBuildings.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {buildings.map((building: Building) => (
+            {filteredBuildings.map((building: Building) => (
               <BuildingCard
                 key={building.id}
                 building={building}
@@ -122,17 +248,24 @@ export default function Buildings() {
               <span className="text-5xl">🏢</span>
             </div>
             <h3 className="text-2xl font-bold text-gray-900 mb-3">
-              אין בניינים במערכת
+              {search || filterCity || filterStatus || filterSize ? 'לא נמצאו בניינים התואמים לסינון' : 'אין בניינים במערכת'}
             </h3>
             <p className="text-gray-500 mb-6 max-w-md mx-auto">
-              השתמש ב-API כדי להוסיף בניינים חדשים למערכת ולהתחיל לעקוב אחר תשלומים
+              {search || filterCity || filterStatus || filterSize
+                ? 'נסה לשנות את פרמטרי החיפוש או הסינון'
+                : 'השתמש ב-API כדי להוסיף בניינים חדשים למערכת ולהתחיל לעקוב אחר תשלומים'}
             </p>
-            <button className="inline-flex items-center px-6 py-3 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors shadow-md">
-              <svg className="w-5 h-5 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              הוסף בניין ראשון
-            </button>
+            {!(search || filterCity || filterStatus || filterSize) && (
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="inline-flex items-center px-6 py-3 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors shadow-md"
+              >
+                <svg className="w-5 h-5 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                הוסף בניין ראשון
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -158,6 +291,14 @@ export default function Buildings() {
         building={buildingToEdit}
         onSave={handleEdit}
         onCancel={() => setBuildingToEdit(null)}
+      />
+
+      {/* Add Building Modal */}
+      <BuildingEditModal
+        isOpen={showAddModal}
+        building={null}
+        onSave={handleCreate}
+        onCancel={() => setShowAddModal(false)}
       />
 
       {/* Delete Error */}
