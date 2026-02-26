@@ -5,7 +5,7 @@ import Layout from '../components/layout/Layout';
 import TenantModal from '../components/modals/TenantModal';
 import TenantImportModal from '../components/modals/TenantImportModal';
 import ConfirmDialog from '../components/modals/ConfirmDialog';
-import { buildingsAPI, tenantsAPI } from '../services/api';
+import { buildingsAPI, tenantsAPI, apartmentsAPI } from '../services/api';
 import type { Tenant } from '../types';
 
 export default function Tenants() {
@@ -19,6 +19,9 @@ export default function Tenants() {
   const [deleteTenant, setDeleteTenant] = useState<Tenant | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [editingPaymentValue, setEditingPaymentValue] = useState<string>('');
+  const [savingPayment, setSavingPayment] = useState(false);
 
   const { data: building } = useQuery({
     queryKey: ['building', buildingId],
@@ -50,6 +53,33 @@ export default function Tenants() {
       setDeleteError((err as Error).message);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleSavePayment = async (tenant: Tenant) => {
+    setSavingPayment(true);
+    try {
+      const val = editingPaymentValue === '' ? null : parseFloat(editingPaymentValue);
+      await apartmentsAPI.patch(tenant.apartment_id, { expected_payment: val });
+      invalidate();
+      setEditingPaymentId(null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
+  const handleResetPayment = async (tenant: Tenant) => {
+    setSavingPayment(true);
+    try {
+      await apartmentsAPI.patch(tenant.apartment_id, { expected_payment: null });
+      invalidate();
+      setEditingPaymentId(null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingPayment(false);
     }
   };
 
@@ -127,7 +157,7 @@ export default function Tenants() {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    {['דירה', 'שם', 'סוג בעלות', 'טלפון', 'בנק', 'שפה', 'ה.קבע', 'פעיל', 'פעולות'].map(col => (
+                    {['דירה', 'שם', 'סוג בעלות', 'טלפון', 'בנק', 'שפה', 'ה.קבע', 'פעיל', 'תשלום צפוי', 'פעולות'].map(col => (
                       <th key={col} className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                         {col}
                       </th>
@@ -170,6 +200,64 @@ export default function Tenants() {
                           <span className="inline-block w-2.5 h-2.5 bg-green-500 rounded-full"></span>
                         ) : (
                           <span className="inline-block w-2.5 h-2.5 bg-gray-300 rounded-full"></span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        {editingPaymentId === tenant.id ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              value={editingPaymentValue}
+                              onChange={e => setEditingPaymentValue(e.target.value)}
+                              placeholder="סכום"
+                              className="w-20 border border-gray-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500"
+                              autoFocus
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') handleSavePayment(tenant);
+                                if (e.key === 'Escape') setEditingPaymentId(null);
+                              }}
+                            />
+                            <button
+                              onClick={() => handleSavePayment(tenant)}
+                              disabled={savingPayment}
+                              className="text-green-600 hover:text-green-800 font-bold"
+                              title="שמור"
+                            >✓</button>
+                            <button
+                              onClick={() => setEditingPaymentId(null)}
+                              className="text-gray-400 hover:text-gray-600"
+                              title="ביטול"
+                            >✗</button>
+                            {tenant.expected_payment != null && (
+                              <button
+                                onClick={() => handleResetPayment(tenant)}
+                                className="text-xs text-blue-500 hover:text-blue-700"
+                                title="חזור לברירת מחדל של הבניין"
+                              >🔄</button>
+                            )}
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setEditingPaymentId(tenant.id);
+                              setEditingPaymentValue(
+                                tenant.expected_payment != null
+                                  ? String(tenant.expected_payment)
+                                  : ''
+                              );
+                            }}
+                            className="flex items-center gap-1 group"
+                            title="לחץ לעריכה"
+                          >
+                            {tenant.expected_payment != null ? (
+                              <span className="text-gray-900">₪{tenant.expected_payment.toLocaleString()}</span>
+                            ) : tenant.building_expected_payment != null ? (
+                              <span className="text-gray-400">₪{tenant.building_expected_payment.toLocaleString()}*</span>
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
+                            <span className="text-gray-300 group-hover:text-blue-500 text-xs">✏️</span>
+                          </button>
                         )}
                       </td>
                       <td className="px-4 py-3">
