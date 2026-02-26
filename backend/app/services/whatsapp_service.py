@@ -246,7 +246,7 @@ Thank you!
         clean_phone = ''.join(filter(str.isdigit, phone_number.replace('+', '')))
 
         # URL-encode the message
-        encoded_message = urllib.parse.quote(message)
+        encoded_message = urllib.parse.quote(message, safe="")
 
         # Create wa.me link
         return f"https://wa.me/{clean_phone}?text={encoded_message}"
