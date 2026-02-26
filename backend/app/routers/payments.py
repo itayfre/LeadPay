@@ -43,8 +43,9 @@ def get_bulk_payment_summary(
     building_ids = [b.id for b in buildings]
 
     # Get active tenant counts per building (one query)
-    tenant_counts = dict(
-        db.query(Apartment.building_id, func.count(Tenant.id))
+    tenant_counts = {
+        str(building_id): count
+        for building_id, count in db.query(Apartment.building_id, func.count(Tenant.id))
         .join(Tenant, Tenant.apartment_id == Apartment.id)
         .filter(
             Apartment.building_id.in_(building_ids),
@@ -52,7 +53,7 @@ def get_bulk_payment_summary(
         )
         .group_by(Apartment.building_id)
         .all()
-    )
+    }
 
     # Get paid tenant IDs and amounts per building for the period (one query)
     paid_rows = (
@@ -63,12 +64,14 @@ def get_bulk_payment_summary(
         )
         .join(BankStatement, BankStatement.building_id == Building.id)
         .join(Transaction, Transaction.statement_id == BankStatement.id)
+        .join(Tenant, Tenant.id == Transaction.matched_tenant_id)
         .filter(
             BankStatement.period_month == month,
             BankStatement.period_year == year,
             Transaction.transaction_type == TransactionType.PAYMENT,
             Transaction.matched_tenant_id != None,
             Transaction.credit_amount != None,
+            Tenant.is_active == True,
         )
         .group_by(Building.id, Transaction.matched_tenant_id)
         .all()
@@ -89,7 +92,7 @@ def get_bulk_payment_summary(
     result = []
     for building in buildings:
         bid = str(building.id)
-        total = tenant_counts.get(building.id, 0)
+        total = tenant_counts.get(bid, 0)
         paid_set = paid_by_building.get(bid, set())
         paid = len(paid_set)
         unpaid = max(0, total - paid)
