@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, ConfigDict
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 from uuid import UUID
 
@@ -39,6 +39,7 @@ class TenantUpdate(BaseModel):
     bank_account: Optional[str] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
+    move_in_date: Optional[date] = None
 
 
 class TenantResponse(TenantBase):
@@ -47,6 +48,7 @@ class TenantResponse(TenantBase):
     building_id: UUID
     created_at: datetime
     updated_at: datetime
+    move_in_date: date
 
     model_config = ConfigDict(from_attributes=True)
 
