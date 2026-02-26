@@ -24,7 +24,7 @@ class Tenant(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     apartment_id = Column(UUID(as_uuid=True), ForeignKey("apartments.id"), nullable=False)
-    building_id = Column(UUID(as_uuid=True), ForeignKey("buildings.id"), nullable=True)
+    building_id = Column(UUID(as_uuid=True), ForeignKey("buildings.id"), nullable=False)
     name = Column(String, nullable=False, comment="Display name (may be abbreviated)")
     full_name = Column(String, nullable=True, comment="Full name for bank matching")
     phone = Column(String, nullable=True, comment="Normalized to +972 format")
