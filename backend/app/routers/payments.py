@@ -30,7 +30,7 @@ def get_bulk_payment_summary(
     Falls back to current month/year if not specified.
     """
     from datetime import datetime as dt
-    if not month or not year:
+    if month is None or year is None:
         now = dt.now()
         month = now.month
         year = now.year
