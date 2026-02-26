@@ -1,7 +1,7 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, String, Boolean, DateTime, Date, ForeignKey, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, date
 import uuid
 import enum
 
@@ -37,6 +37,12 @@ class Tenant(Base):
     bank_account = Column(String, nullable=True, comment="Bank account number")
     notes = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
+    move_in_date = Column(
+        Date,
+        nullable=False,
+        server_default='2026-01-01',
+        comment="Debt calculation start date"
+    )
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
