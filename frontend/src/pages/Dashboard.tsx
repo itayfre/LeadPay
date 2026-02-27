@@ -17,6 +17,10 @@ export default function Dashboard() {
   const [savingExpected, setSavingExpected] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [whatsappMessages, setWhatsappMessages] = useState<WhatsAppMessage[]>([]);
+  const [manualPaymentFor, setManualPaymentFor] = useState<PaymentStatus | null>(null);
+  const [manualAmount, setManualAmount] = useState<string>('');
+  const [manualNote, setManualNote] = useState<string>('');
+  const [savingManual, setSavingManual] = useState(false);
 
   // Get current month and year
   const now = new Date();
@@ -74,6 +78,29 @@ export default function Dashboard() {
       setShowWhatsAppModal(true);
     } catch (err) {
       console.error('Failed to generate reminders:', err);
+    }
+  };
+
+  const handleManualPayment = async () => {
+    if (!manualPaymentFor || !buildingId) return;
+    setSavingManual(true);
+    try {
+      await paymentsAPI.postManualPayment({
+        building_id: buildingId,
+        tenant_id: manualPaymentFor.tenant_id,
+        amount: parseFloat(manualAmount),
+        month: selectedMonth,
+        year: selectedYear,
+        note: manualNote || undefined,
+      });
+      queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId, selectedMonth, selectedYear] });
+      setManualPaymentFor(null);
+      setManualAmount('');
+      setManualNote('');
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingManual(false);
     }
   };
 
@@ -303,8 +330,18 @@ export default function Dashboard() {
                           </button>
                         )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        ₪{payment.paid_amount.toLocaleString()}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <button
+                          onClick={() => {
+                            setManualPaymentFor(payment);
+                            setManualAmount(payment.expected_amount.toString());
+                            setManualNote('');
+                          }}
+                          className="text-gray-900 hover:text-green-600 hover:underline cursor-pointer"
+                          title="לחץ להזנת תשלום ידני"
+                        >
+                          ₪{payment.paid_amount.toLocaleString()}
+                        </button>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
@@ -371,6 +408,54 @@ export default function Dashboard() {
           </>
         )}
       </div>
+
+      {/* Manual Payment Modal */}
+      {manualPaymentFor && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
+            <h3 className="text-lg font-bold text-gray-900">סמן כשולם — {manualPaymentFor.tenant_name}</h3>
+            <p className="text-sm text-gray-500">
+              דירה {manualPaymentFor.apartment_number} • {String(selectedMonth).padStart(2,'0')}/{selectedYear}
+            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">סכום (₪)</label>
+              <input
+                type="number"
+                value={manualAmount}
+                onChange={e => setManualAmount(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                placeholder="500"
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">הערה (אופציונלי)</label>
+              <input
+                type="text"
+                value={manualNote}
+                onChange={e => setManualNote(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                placeholder="תשלום במזומן"
+              />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setManualPaymentFor(null)}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              >
+                ביטול
+              </button>
+              <button
+                onClick={handleManualPayment}
+                disabled={!manualAmount || savingManual}
+                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-semibold"
+              >
+                {savingManual ? 'שומר...' : '✓ אשר תשלום'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* WhatsApp Modal */}
       {showWhatsAppModal && (
