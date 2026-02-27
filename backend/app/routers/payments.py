@@ -482,7 +482,7 @@ def get_payment_status(
             "phone": tenant.phone,
             "language": tenant.language.value if tenant.language else "he",
             "apartment_id": str(apartment.id),
-            "move_in_date": tenant.move_in_date.isoformat() if tenant.move_in_date else None,
+            "move_in_date": tenant.move_in_date.isoformat(),
             "total_debt": _calculate_tenant_debt_from_map(
                 tenant, apartment, building,
                 dict(historical_paid_by_tenant.get(str(tenant.id), {})),

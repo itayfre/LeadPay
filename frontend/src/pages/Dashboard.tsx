@@ -519,7 +519,7 @@ export default function Dashboard() {
               </button>
               <button
                 onClick={handleManualPayment}
-                disabled={!manualAmount || savingManual}
+                disabled={!manualAmount || isNaN(parseFloat(manualAmount)) || parseFloat(manualAmount) <= 0 || savingManual}
                 className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-semibold"
               >
                 {savingManual ? 'שומר...' : '✓ אשר תשלום'}
