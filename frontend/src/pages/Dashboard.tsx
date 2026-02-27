@@ -22,6 +22,10 @@ export default function Dashboard() {
   const [manualNote, setManualNote] = useState<string>('');
   const [savingManual, setSavingManual] = useState(false);
 
+  // Sort state
+  const [sortColumn, setSortColumn] = useState<string>('apartment_number');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
   // Get current month and year
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
@@ -40,6 +44,29 @@ export default function Dashboard() {
     queryFn: () => paymentsAPI.getStatus(buildingId!, selectedMonth, selectedYear),
     enabled: !!buildingId,
   });
+
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  };
+
+  const sortedTenants = [...(paymentStatus?.tenants || [])].sort((a, b) => {
+    const dir = sortDirection === 'asc' ? 1 : -1;
+    const aVal = (a as any)[sortColumn];
+    const bVal = (b as any)[sortColumn];
+    if (typeof aVal === 'number') return (aVal - bVal) * dir;
+    return String(aVal || '').localeCompare(String(bVal || ''), 'he') * dir;
+  });
+
+  const SortIcon = ({ column }: { column: string }) => (
+    <span className={`ml-1 text-xs ${sortColumn === column ? 'text-blue-600' : 'text-gray-300'}`}>
+      {sortColumn === column ? (sortDirection === 'asc' ? '▲' : '▼') : '⇅'}
+    </span>
+  );
 
   const handleToggleLanguage = async (payment: PaymentStatus) => {
     if (togglingLanguage === payment.tenant_id) return;
@@ -265,20 +292,41 @@ export default function Dashboard() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    {t('payment.apartment')}
+                  <th
+                    onClick={() => handleSort('apartment_number')}
+                    className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  >
+                    {t('payment.apartment')}<SortIcon column="apartment_number" />
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    {t('payment.tenant')}
+                  <th
+                    onClick={() => handleSort('tenant_name')}
+                    className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  >
+                    {t('payment.tenant')}<SortIcon column="tenant_name" />
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    {t('payment.expected')}
+                  <th
+                    onClick={() => handleSort('expected_amount')}
+                    className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  >
+                    {t('payment.expected')}<SortIcon column="expected_amount" />
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    {t('payment.paid')}
+                  <th
+                    onClick={() => handleSort('paid_amount')}
+                    className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  >
+                    {t('payment.paid')}<SortIcon column="paid_amount" />
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    {t('payment.status')}
+                  <th
+                    onClick={() => handleSort('total_debt')}
+                    className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  >
+                    חוב כולל<SortIcon column="total_debt" />
+                  </th>
+                  <th
+                    onClick={() => handleSort('status')}
+                    className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  >
+                    {t('payment.status')}<SortIcon column="status" />
                   </th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                     שפה
@@ -289,8 +337,8 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {paymentStatus?.tenants && paymentStatus.tenants.length > 0 ? (
-                  paymentStatus.tenants.map((payment) => (
+                {sortedTenants.length > 0 ? (
+                  sortedTenants.map((payment) => (
                     <tr key={payment.tenant_id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         {payment.apartment_number}
@@ -342,6 +390,13 @@ export default function Dashboard() {
                         >
                           ₪{payment.paid_amount.toLocaleString()}
                         </button>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <span className={(payment as any).total_debt > 0 ? 'text-red-600' : 'text-gray-400'}>
+                          {(payment as any).total_debt > 0
+                            ? `₪${Math.round((payment as any).total_debt).toLocaleString()}`
+                            : '—'}
+                        </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
@@ -396,7 +451,7 @@ export default function Dashboard() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
                       אין נתוני תשלומים לתקופה זו
                     </td>
                   </tr>
