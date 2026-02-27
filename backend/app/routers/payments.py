@@ -162,12 +162,22 @@ def create_manual_payment(
     Record a manual payment for a tenant (cash, bank transfer outside normal matching).
     Creates a Transaction with is_manual=True and statement_id=None.
     """
-    from datetime import date
 
     # Validate tenant exists
     tenant = db.query(Tenant).filter(Tenant.id == payload.tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=404, detail=f"Tenant {payload.tenant_id} not found")
+
+    # Validate tenant belongs to the specified building
+    apartment_check = db.query(Apartment).filter(
+        Apartment.id == tenant.apartment_id,
+        Apartment.building_id == payload.building_id
+    ).first()
+    if not apartment_check:
+        raise HTTPException(
+            status_code=404,
+            detail="Tenant does not belong to the specified building"
+        )
 
     # Validate amount
     if payload.amount <= 0:
@@ -181,7 +191,7 @@ def create_manual_payment(
     # Create transaction (no statement_id — is_manual=True)
     txn = Transaction(
         statement_id=None,
-        activity_date=date(payload.year, payload.month, 1),
+        activity_date=datetime(payload.year, payload.month, 1),
         description=description,
         credit_amount=payload.amount,
         debit_amount=None,
