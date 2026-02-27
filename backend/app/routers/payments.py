@@ -219,6 +219,112 @@ def create_manual_payment(
     }
 
 
+
+@router.get("/tenant/{tenant_id}/history")
+def get_tenant_payment_history(
+    tenant_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Return month-by-month payment history for a tenant from move_in_date to current month.
+    Each month includes summary + individual transactions (bank-statement and manual).
+    """
+    from datetime import date
+
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail=f"Tenant {tenant_id} not found")
+
+    apartment = db.query(Apartment).filter(Apartment.id == tenant.apartment_id).first()
+    if not apartment:
+        raise HTTPException(status_code=404, detail="Apartment not found for tenant")
+    building = db.query(Building).filter(Building.id == apartment.building_id).first()
+    if not building:
+        raise HTTPException(status_code=404, detail="Building not found for apartment")
+
+    expected_monthly = float(apartment.expected_payment or building.expected_monthly_payment or 0)
+    move_in = tenant.move_in_date or date(2026, 1, 1)
+    today = date.today()
+
+    # Generate list of all months from move_in to today
+    months_list = []
+    y, m = move_in.year, move_in.month
+    while (y, m) <= (today.year, today.month):
+        months_list.append((y, m))
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+
+    # Get ALL transactions for this tenant (bank + manual) using outerjoin
+    all_transactions = (
+        db.query(Transaction, BankStatement)
+        .outerjoin(BankStatement, Transaction.statement_id == BankStatement.id)
+        .filter(
+            Transaction.matched_tenant_id == tenant.id,
+            Transaction.transaction_type == TransactionType.PAYMENT,
+        )
+        .order_by(Transaction.activity_date.asc())
+        .all()
+    )
+
+    # Group transactions by (year, month)
+    txns_by_month: dict = {}
+    for txn, stmt in all_transactions:
+        if stmt is not None:
+            key = (stmt.period_year, stmt.period_month)
+        else:
+            # manual transaction: derive period from activity_date
+            act_date = txn.activity_date
+            if hasattr(act_date, "date"):
+                act_date = act_date.date()
+            key = (act_date.year, act_date.month)
+        if key not in txns_by_month:
+            txns_by_month[key] = []
+        act = txn.activity_date
+        date_str = act.date().isoformat() if hasattr(act, "date") else str(act)[:10]
+        txns_by_month[key].append({
+            "id": str(txn.id),
+            "date": date_str,
+            "amount": float(txn.credit_amount or 0),
+            "description": txn.description,
+            "is_manual": bool(txn.is_manual),
+        })
+
+    # Build month-by-month summary
+    result_months = []
+    for (y, m) in months_list:
+        month_txns = txns_by_month.get((y, m), [])
+        paid = sum(t["amount"] for t in month_txns)
+        diff = paid - expected_monthly
+        if expected_monthly == 0:
+            st = "paid"
+        elif paid >= expected_monthly - 0.5:
+            st = "paid"
+        elif paid > 0:
+            st = "partial"
+        else:
+            st = "unpaid"
+
+        result_months.append({
+            "month": m,
+            "year": y,
+            "period": f"{m:02d}/{y}",
+            "expected": expected_monthly,
+            "paid": round(paid, 2),
+            "difference": round(diff, 2),
+            "status": st,
+            "transactions": month_txns,
+        })
+
+    return {
+        "tenant_id": str(tenant.id),
+        "tenant_name": tenant.name,
+        "apartment_number": apartment.number,
+        "move_in_date": move_in.isoformat(),
+        "months": result_months,
+    }
+
 @router.get("/{building_id}/status")
 def get_payment_status(
     building_id: UUID,
@@ -480,107 +586,4 @@ def get_payment_history(
         "building_id": str(building_id),
         "building_name": building.name,
         "history": history
-    }
-
-
-
-@router.get("/tenant/{tenant_id}/history")
-def get_tenant_payment_history(
-    tenant_id: str,
-    db: Session = Depends(get_db)
-):
-    """
-    Return month-by-month payment history for a tenant from move_in_date to current month.
-    Each month includes summary + individual transactions (bank-statement and manual).
-    """
-    from datetime import date
-
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        raise HTTPException(status_code=404, detail=f"Tenant {tenant_id} not found")
-
-    apartment = db.query(Apartment).filter(Apartment.id == tenant.apartment_id).first()
-    building = db.query(Building).filter(Building.id == apartment.building_id).first()
-
-    expected_monthly = float(apartment.expected_payment or building.expected_monthly_payment or 0)
-    move_in = tenant.move_in_date or date(2026, 1, 1)
-    today = date.today()
-
-    # Generate list of all months from move_in to today
-    months_list = []
-    y, m = move_in.year, move_in.month
-    while (y, m) <= (today.year, today.month):
-        months_list.append((y, m))
-        m += 1
-        if m > 12:
-            m = 1
-            y += 1
-
-    # Get ALL transactions for this tenant (bank + manual) using outerjoin
-    all_transactions = (
-        db.query(Transaction, BankStatement)
-        .outerjoin(BankStatement, Transaction.statement_id == BankStatement.id)
-        .filter(
-            Transaction.matched_tenant_id == tenant.id,
-            Transaction.transaction_type == TransactionType.PAYMENT,
-        )
-        .order_by(Transaction.activity_date.asc())
-        .all()
-    )
-
-    # Group transactions by (year, month)
-    txns_by_month: dict = {}
-    for txn, stmt in all_transactions:
-        if stmt is not None:
-            key = (stmt.period_year, stmt.period_month)
-        else:
-            # manual transaction: derive period from activity_date
-            act_date = txn.activity_date
-            if hasattr(act_date, "date"):
-                act_date = act_date.date()
-            key = (act_date.year, act_date.month)
-        if key not in txns_by_month:
-            txns_by_month[key] = []
-        act = txn.activity_date
-        date_str = act.date().isoformat() if hasattr(act, "date") else str(act)[:10]
-        txns_by_month[key].append({
-            "id": str(txn.id),
-            "date": date_str,
-            "amount": float(txn.credit_amount or 0),
-            "description": txn.description,
-            "is_manual": bool(txn.is_manual),
-        })
-
-    # Build month-by-month summary
-    result_months = []
-    for (y, m) in months_list:
-        month_txns = txns_by_month.get((y, m), [])
-        paid = sum(t["amount"] for t in month_txns)
-        diff = paid - expected_monthly
-        if expected_monthly == 0:
-            st = "paid"
-        elif paid >= expected_monthly - 0.5:
-            st = "paid"
-        elif paid > 0:
-            st = "partial"
-        else:
-            st = "unpaid"
-
-        result_months.append({
-            "month": m,
-            "year": y,
-            "period": f"{m:02d}/{y}",
-            "expected": expected_monthly,
-            "paid": round(paid, 2),
-            "difference": round(diff, 2),
-            "status": st,
-            "transactions": month_txns,
-        })
-
-    return {
-        "tenant_id": str(tenant.id),
-        "tenant_name": tenant.name,
-        "apartment_number": apartment.number,
-        "move_in_date": move_in.isoformat(),
-        "months": result_months,
     }
