@@ -46,6 +46,7 @@ export interface Tenant {
   floor?: number;
   expected_payment?: number | null;           // per-apartment override (null = not set)
   building_expected_payment?: number | null;  // building default (for display fallback)
+  move_in_date?: string;   // ISO date, default "2026-01-01"
 }
 
 export interface PaymentStatus {
@@ -61,6 +62,9 @@ export interface PaymentStatus {
   is_underpaid: boolean;
   phone?: string;
   language: 'he' | 'en';
+  apartment_id: string;
+  move_in_date: string;   // ISO date "2026-01-01"
+  total_debt: number;
 }
 
 export interface PaymentStatusResponse {
@@ -77,6 +81,42 @@ export interface PaymentStatusResponse {
     amount_rate: string;
   };
   tenants: PaymentStatus[];
+}
+
+export interface TenantTransaction {
+  id: string;
+  date: string;
+  amount: number;
+  description: string;
+  is_manual: boolean;
+}
+
+export interface TenantPaymentHistoryMonth {
+  month: number;
+  year: number;
+  period: string;
+  expected: number;
+  paid: number;
+  difference: number;
+  status: 'paid' | 'partial' | 'unpaid';
+  transactions: TenantTransaction[];
+}
+
+export interface TenantPaymentHistory {
+  tenant_id: string;
+  tenant_name: string;
+  apartment_number: number;
+  move_in_date: string | null;
+  months: TenantPaymentHistoryMonth[];
+}
+
+export interface ManualPaymentRequest {
+  building_id: string;
+  tenant_id: string;
+  amount: number;
+  month: number;
+  year: number;
+  note?: string;
 }
 
 export interface WhatsAppMessage {
