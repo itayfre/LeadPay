@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Layout from '../components/layout/Layout';
 import { paymentsAPI, buildingsAPI, messagesAPI, tenantsAPI, apartmentsAPI } from '../services/api';
-import type { PaymentStatus, WhatsAppMessage } from '../types';
+import type { PaymentStatus, WhatsAppMessage, TenantPaymentHistory } from '../types';
 
 export default function Dashboard() {
   const { t } = useTranslation();
@@ -21,6 +21,10 @@ export default function Dashboard() {
   const [manualAmount, setManualAmount] = useState<string>('');
   const [manualNote, setManualNote] = useState<string>('');
   const [savingManual, setSavingManual] = useState(false);
+
+  // Payment history modal state
+  const [historyTenantId, setHistoryTenantId] = useState<string | null>(null);
+  const [selectedHistoryMonth, setSelectedHistoryMonth] = useState<{ month: number; year: number } | null>(null);
 
   // Sort state
   const [sortColumn, setSortColumn] = useState<string>('apartment_number');
@@ -43,6 +47,13 @@ export default function Dashboard() {
     queryKey: ['paymentStatus', buildingId, selectedMonth, selectedYear],
     queryFn: () => paymentsAPI.getStatus(buildingId!, selectedMonth, selectedYear),
     enabled: !!buildingId,
+  });
+
+  // Fetch tenant payment history
+  const { data: tenantHistory, isLoading: historyLoading } = useQuery({
+    queryKey: ['tenantHistory', historyTenantId],
+    queryFn: () => paymentsAPI.getTenantHistory(historyTenantId!),
+    enabled: !!historyTenantId,
   });
 
   const handleSort = (column: string) => {
@@ -340,10 +351,16 @@ export default function Dashboard() {
                 {sortedTenants.length > 0 ? (
                   sortedTenants.map((payment) => (
                     <tr key={payment.tenant_id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      <td
+                        className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600 cursor-pointer hover:underline"
+                        onClick={() => { setHistoryTenantId(payment.tenant_id); setSelectedHistoryMonth(null); }}
+                      >
                         {payment.apartment_number}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td
+                        className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 cursor-pointer hover:text-blue-600"
+                        onClick={() => { setHistoryTenantId(payment.tenant_id); setSelectedHistoryMonth(null); }}
+                      >
                         {payment.tenant_name}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -519,6 +536,17 @@ export default function Dashboard() {
           onClose={() => setShowWhatsAppModal(false)}
         />
       )}
+
+      {/* Payment History Modal */}
+      {historyTenantId && (
+        <PaymentHistoryModal
+          tenantHistory={tenantHistory}
+          isLoading={historyLoading}
+          selectedMonthData={selectedHistoryMonth}
+          onSelectMonth={setSelectedHistoryMonth}
+          onClose={() => { setHistoryTenantId(null); setSelectedHistoryMonth(null); }}
+        />
+      )}
     </Layout>
   );
 }
@@ -628,6 +656,121 @@ function WhatsAppModal({ messages, onClose }: WhatsAppModalProps) {
             );
           })}
         </div>
+      </div>
+    </div>
+  );
+}
+
+interface PaymentHistoryModalProps {
+  tenantHistory: TenantPaymentHistory | undefined;
+  isLoading: boolean;
+  selectedMonthData: { month: number; year: number } | null;
+  onSelectMonth: (m: { month: number; year: number }) => void;
+  onClose: () => void;
+}
+
+function PaymentHistoryModal({ tenantHistory, isLoading, selectedMonthData, onSelectMonth, onClose }: PaymentHistoryModalProps) {
+  const activeMonth = selectedMonthData
+    ? tenantHistory?.months.find(m => m.month === selectedMonthData.month && m.year === selectedMonthData.year)
+    : tenantHistory?.months[tenantHistory.months.length - 1];
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="p-6 border-b border-gray-200 flex justify-between items-center">
+          <div>
+            <h3 className="text-xl font-bold text-gray-900">
+              היסטוריית תשלומים — {tenantHistory?.tenant_name}
+            </h3>
+            <p className="text-sm text-gray-500">
+              דירה {tenantHistory?.apartment_number} • מאז {tenantHistory?.move_in_date ?? '—'}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700 text-lg">✕</button>
+        </div>
+
+        {isLoading ? (
+          <div className="flex-1 flex items-center justify-center p-12">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+          </div>
+        ) : !tenantHistory ? (
+          <div className="flex-1 flex items-center justify-center p-12 text-gray-400">אין נתונים</div>
+        ) : (
+          <div className="flex flex-1 overflow-hidden">
+            {/* Left: Month-by-month table */}
+            <div className="w-1/2 overflow-y-auto border-r border-gray-200">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 sticky top-0">
+                  <tr>
+                    <th className="px-4 py-2 text-right text-xs text-gray-500">תקופה</th>
+                    <th className="px-4 py-2 text-right text-xs text-gray-500">צפוי</th>
+                    <th className="px-4 py-2 text-right text-xs text-gray-500">שולם</th>
+                    <th className="px-4 py-2 text-right text-xs text-gray-500">הפרש</th>
+                    <th className="px-4 py-2 text-right text-xs text-gray-500">סטטוס</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {[...tenantHistory.months].reverse().map(m => {
+                    const isActive = activeMonth?.month === m.month && activeMonth?.year === m.year;
+                    return (
+                      <tr
+                        key={`${m.year}-${m.month}`}
+                        onClick={() => onSelectMonth({ month: m.month, year: m.year })}
+                        className={`cursor-pointer hover:bg-blue-50 transition-colors ${isActive ? 'bg-blue-50 font-medium' : ''}`}
+                      >
+                        <td className="px-4 py-2 text-gray-700">{m.period}</td>
+                        <td className="px-4 py-2 text-gray-600">₪{m.expected.toLocaleString()}</td>
+                        <td className="px-4 py-2 text-gray-900">₪{m.paid.toLocaleString()}</td>
+                        <td className={`px-4 py-2 ${m.difference < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                          {m.difference >= 0 ? '+' : ''}₪{m.difference.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2">
+                          <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                            m.status === 'paid' ? 'bg-green-100 text-green-700' :
+                            m.status === 'partial' ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>
+                            {m.status === 'paid' ? '✓ שולם' : m.status === 'partial' ? '⚠ חלקי' : '✗ לא שולם'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Right: Transactions for selected month */}
+            <div className="w-1/2 overflow-y-auto p-4">
+              {activeMonth ? (
+                <>
+                  <h4 className="font-semibold text-gray-700 mb-3">עסקאות — {activeMonth.period}</h4>
+                  {activeMonth.transactions.length === 0 ? (
+                    <p className="text-gray-400 text-sm text-center py-8">אין עסקאות לתקופה זו</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {activeMonth.transactions.map(txn => (
+                        <div key={txn.id} className="border border-gray-200 rounded-lg p-3 space-y-1">
+                          <div className="flex justify-between items-start">
+                            <span className="font-semibold text-green-700">₪{txn.amount.toLocaleString()}</span>
+                            <span className="text-xs text-gray-400">{txn.date}</span>
+                          </div>
+                          <p className="text-sm text-gray-600 truncate">{txn.description}</p>
+                          {txn.is_manual && (
+                            <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">ידני</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-gray-400 text-sm text-center py-8">בחר חודש מהרשימה</p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
