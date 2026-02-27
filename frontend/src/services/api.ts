@@ -1,4 +1,4 @@
-import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, BankStatement, Transaction } from '../types';
+import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, BankStatement, Transaction, TenantPaymentHistory, ManualPaymentRequest } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -64,6 +64,15 @@ export const paymentsAPI = {
     fetchAPI<BuildingPaymentSummary[]>(
       `/api/v1/payments/bulk-summary?month=${month}&year=${year}`
     ),
+
+  postManualPayment: (data: ManualPaymentRequest) =>
+    fetchAPI<{ transaction_id: string; tenant_id: string; tenant_name: string; amount: number; month: number; year: number; description: string; is_manual: boolean }>(
+      '/api/v1/payments/manual',
+      { method: 'POST', body: JSON.stringify(data) }
+    ),
+
+  getTenantHistory: (tenantId: string) =>
+    fetchAPI<TenantPaymentHistory>(`/api/v1/payments/tenant/${tenantId}/history`),
 };
 
 // Statements API
