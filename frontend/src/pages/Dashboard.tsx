@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Layout from '../components/layout/Layout';
-import { paymentsAPI, buildingsAPI, messagesAPI, tenantsAPI } from '../services/api';
+import { paymentsAPI, buildingsAPI, messagesAPI, tenantsAPI, apartmentsAPI } from '../services/api';
 import type { PaymentStatus, WhatsAppMessage } from '../types';
 
 export default function Dashboard() {
@@ -12,6 +12,9 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [togglingLanguage, setTogglingLanguage] = useState<string | null>(null);
+  const [editingExpectedId, setEditingExpectedId] = useState<string | null>(null);
+  const [editingExpectedValue, setEditingExpectedValue] = useState<string>('');
+  const [savingExpected, setSavingExpected] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [whatsappMessages, setWhatsappMessages] = useState<WhatsAppMessage[]>([]);
 
@@ -45,6 +48,20 @@ export default function Dashboard() {
       console.error('Failed to update language:', err);
     } finally {
       setTogglingLanguage(null);
+    }
+  };
+
+  const handleSaveExpected = async (payment: PaymentStatus) => {
+    setSavingExpected(true);
+    try {
+      const val = editingExpectedValue === '' ? null : parseFloat(editingExpectedValue);
+      await apartmentsAPI.patch(payment.apartment_id, { expected_payment: val });
+      queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId, selectedMonth, selectedYear] });
+      setEditingExpectedId(null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingExpected(false);
     }
   };
 
@@ -254,8 +271,37 @@ export default function Dashboard() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {payment.tenant_name}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        ₪{payment.expected_amount.toLocaleString()}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        {editingExpectedId === payment.tenant_id ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              value={editingExpectedValue}
+                              onChange={e => setEditingExpectedValue(e.target.value)}
+                              className="w-24 border border-gray-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500"
+                              autoFocus
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') handleSaveExpected(payment);
+                                if (e.key === 'Escape') setEditingExpectedId(null);
+                              }}
+                            />
+                            <button onClick={() => handleSaveExpected(payment)} disabled={savingExpected}
+                              className="text-green-600 hover:text-green-800 text-xs font-bold px-1">✓</button>
+                            <button onClick={() => setEditingExpectedId(null)}
+                              className="text-gray-400 hover:text-gray-600 text-xs px-1">✕</button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setEditingExpectedId(payment.tenant_id);
+                              setEditingExpectedValue(payment.expected_amount.toString());
+                            }}
+                            className="text-gray-900 hover:text-blue-600 hover:underline cursor-pointer font-medium"
+                            title="לחץ לעריכה"
+                          >
+                            ₪{payment.expected_amount.toLocaleString()}
+                          </button>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         ₪{payment.paid_amount.toLocaleString()}
