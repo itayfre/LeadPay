@@ -1,15 +1,17 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Layout from '../components/layout/Layout';
-import { paymentsAPI, buildingsAPI, messagesAPI } from '../services/api';
-import type { WhatsAppMessage } from '../types';
+import { paymentsAPI, buildingsAPI, messagesAPI, tenantsAPI } from '../services/api';
+import type { PaymentStatus, WhatsAppMessage } from '../types';
 
 export default function Dashboard() {
   const { t } = useTranslation();
   const { buildingId } = useParams<{ buildingId: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [togglingLanguage, setTogglingLanguage] = useState<string | null>(null);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [whatsappMessages, setWhatsappMessages] = useState<WhatsAppMessage[]>([]);
 
@@ -31,6 +33,20 @@ export default function Dashboard() {
     queryFn: () => paymentsAPI.getStatus(buildingId!, selectedMonth, selectedYear),
     enabled: !!buildingId,
   });
+
+  const handleToggleLanguage = async (payment: PaymentStatus) => {
+    if (togglingLanguage === payment.tenant_id) return;
+    setTogglingLanguage(payment.tenant_id);
+    const newLang = payment.language === 'he' ? 'en' : 'he';
+    try {
+      await tenantsAPI.update(payment.tenant_id, { language: newLang as 'he' | 'en' });
+      queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId, selectedMonth, selectedYear] });
+    } catch (err) {
+      console.error('Failed to update language:', err);
+    } finally {
+      setTogglingLanguage(null);
+    }
+  };
 
   const handleGenerateReminders = async () => {
     if (!buildingId) return;
@@ -221,6 +237,9 @@ export default function Dashboard() {
                     {t('payment.status')}
                   </th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    שפה
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                     {t('payment.actions')}
                   </th>
                 </tr>
@@ -252,6 +271,20 @@ export default function Dashboard() {
                           {payment.status === 'paid' ? '✅ ' + t('dashboard.paid') : '❌ ' + t('dashboard.unpaid')}
                         </span>
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <button
+                          onClick={() => handleToggleLanguage(payment)}
+                          disabled={togglingLanguage === payment.tenant_id}
+                          className={`inline-flex px-2 py-0.5 text-xs rounded font-medium transition-colors cursor-pointer
+                            ${payment.language === 'he'
+                              ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            } disabled:opacity-50`}
+                          title="לחץ לשינוי שפה"
+                        >
+                          {togglingLanguage === payment.tenant_id ? '...' : payment.language === 'he' ? 'עב' : 'EN'}
+                        </button>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         {payment.status !== 'paid' && payment.phone && (
                           <button
@@ -280,7 +313,7 @@ export default function Dashboard() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                       אין נתוני תשלומים לתקופה זו
                     </td>
                   </tr>
