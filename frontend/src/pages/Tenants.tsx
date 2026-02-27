@@ -5,7 +5,7 @@ import Layout from '../components/layout/Layout';
 import TenantModal from '../components/modals/TenantModal';
 import TenantImportModal from '../components/modals/TenantImportModal';
 import ConfirmDialog from '../components/modals/ConfirmDialog';
-import { buildingsAPI, tenantsAPI, apartmentsAPI } from '../services/api';
+import { buildingsAPI, tenantsAPI, apartmentsAPI, paymentsAPI } from '../services/api';
 import type { Tenant } from '../types';
 
 export default function Tenants() {
@@ -22,6 +22,14 @@ export default function Tenants() {
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editingPaymentValue, setEditingPaymentValue] = useState<string>('');
   const [savingPayment, setSavingPayment] = useState(false);
+
+  // Task 15: move_in_date editing state
+  const [editingMoveInId, setEditingMoveInId] = useState<string | null>(null);
+  const [editingMoveInValue, setEditingMoveInValue] = useState<string>('');
+  const [savingMoveIn, setSavingMoveIn] = useState(false);
+
+  // Task 16: on-demand debt state
+  const [tenantDebts, setTenantDebts] = useState<Record<string, number | 'loading'>>({});
 
   const { data: building } = useQuery({
     queryKey: ['building', buildingId],
@@ -80,6 +88,36 @@ export default function Tenants() {
       console.error(err);
     } finally {
       setSavingPayment(false);
+    }
+  };
+
+  // Task 15: save move_in_date
+  const handleSaveMoveIn = async (tenant: Tenant) => {
+    setSavingMoveIn(true);
+    try {
+      await tenantsAPI.update(tenant.id, { move_in_date: editingMoveInValue });
+      invalidate();
+      setEditingMoveInId(null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingMoveIn(false);
+    }
+  };
+
+  // Task 16: lazy-load debt for a tenant
+  const handleLoadDebt = async (tenantId: string) => {
+    setTenantDebts(prev => ({ ...prev, [tenantId]: 'loading' }));
+    try {
+      const history = await paymentsAPI.getTenantHistory(tenantId);
+      const debt = history.months.reduce(
+        (sum: number, m: { expected: number; paid: number }) =>
+          sum + Math.max(0, m.expected - m.paid),
+        0
+      );
+      setTenantDebts(prev => ({ ...prev, [tenantId]: Math.round(debt) }));
+    } catch {
+      setTenantDebts(prev => ({ ...prev, [tenantId]: 0 }));
     }
   };
 
@@ -157,7 +195,7 @@ export default function Tenants() {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    {['דירה', 'שם', 'סוג בעלות', 'טלפון', 'בנק', 'שפה', 'ה.קבע', 'פעיל', 'תשלום צפוי', 'פעולות'].map(col => (
+                    {['דירה', 'שם', 'סוג בעלות', 'טלפון', 'בנק', 'שפה', 'ה.קבע', 'פעיל', 'תשלום צפוי', 'חוב כולל', 'תאריך כניסה', 'פעולות'].map(col => (
                       <th key={col} className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                         {col}
                       </th>
@@ -260,6 +298,66 @@ export default function Tenants() {
                           </button>
                         )}
                       </td>
+
+                      {/* Task 16: חוב כולל (lazy-load) */}
+                      <td className="px-4 py-3 text-sm">
+                        {tenantDebts[tenant.id] === 'loading' ? (
+                          <span className="text-gray-400 text-xs">טוען...</span>
+                        ) : typeof tenantDebts[tenant.id] === 'number' ? (
+                          <span className={(tenantDebts[tenant.id] as number) > 0 ? 'text-red-600 font-medium' : 'text-green-600'}>
+                            ₪{(tenantDebts[tenant.id] as number).toLocaleString()}
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleLoadDebt(tenant.id)}
+                            className="text-xs text-blue-500 hover:text-blue-700 underline"
+                          >
+                            חשב
+                          </button>
+                        )}
+                      </td>
+
+                      {/* Task 15: תאריך כניסה (move_in_date) */}
+                      <td className="px-4 py-3 text-sm">
+                        {editingMoveInId === tenant.id ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="date"
+                              value={editingMoveInValue}
+                              onChange={e => setEditingMoveInValue(e.target.value)}
+                              className="border border-gray-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500"
+                              autoFocus
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') handleSaveMoveIn(tenant);
+                                if (e.key === 'Escape') setEditingMoveInId(null);
+                              }}
+                            />
+                            <button
+                              onClick={() => handleSaveMoveIn(tenant)}
+                              disabled={savingMoveIn}
+                              className="text-green-600 hover:text-green-800 text-xs font-bold px-1"
+                            >✓</button>
+                            <button
+                              onClick={() => setEditingMoveInId(null)}
+                              className="text-gray-400 hover:text-gray-600 text-xs px-1"
+                            >✕</button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setEditingMoveInId(tenant.id);
+                              setEditingMoveInValue(tenant.move_in_date || '2026-01-01');
+                            }}
+                            className="text-gray-600 hover:text-blue-600 hover:underline cursor-pointer text-sm"
+                            title="לחץ לעריכת תאריך כניסה"
+                          >
+                            {tenant.move_in_date
+                              ? new Date(tenant.move_in_date).toLocaleDateString('he-IL')
+                              : '01/01/2026'}
+                          </button>
+                        )}
+                      </td>
+
                       <td className="px-4 py-3">
                         <div className="flex gap-2">
                           <button
