@@ -28,9 +28,6 @@ export default function Tenants() {
   const [editingMoveInValue, setEditingMoveInValue] = useState<string>('');
   const [savingMoveIn, setSavingMoveIn] = useState(false);
 
-  // Task 16: on-demand debt state
-  const [tenantDebts, setTenantDebts] = useState<Record<string, number | 'loading'>>({});
-
   const { data: building } = useQuery({
     queryKey: ['building', buildingId],
     queryFn: () => buildingsAPI.get(buildingId!),
@@ -41,6 +38,63 @@ export default function Tenants() {
     queryKey: ['tenants', buildingId],
     queryFn: () => tenantsAPI.list(buildingId!),
     enabled: !!buildingId,
+  });
+
+  const { data: tenantDebts } = useQuery({
+    queryKey: ['tenantDebts', buildingId],
+    queryFn: () => paymentsAPI.getTenantDebts(buildingId!),
+    enabled: !!buildingId,
+  });
+
+  // Sort state
+  const [sortColumn, setSortColumn] = useState<string>('apartment_number');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  const handleSort = (col: string) => {
+    if (sortColumn === col) {
+      setSortDirection(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(col);
+      setSortDirection('asc');
+    }
+  };
+
+  const SortIcon = ({ col }: { col: string }) => (
+    <span className={`ml-1 text-xs ${sortColumn === col ? 'text-blue-600' : 'text-gray-300'}`}>
+      {sortColumn === col ? (sortDirection === 'asc' ? '▲' : '▼') : '⇅'}
+    </span>
+  );
+
+  const sortedTenants = [...(tenants || [])].sort((a, b) => {
+    const dir = sortDirection === 'asc' ? 1 : -1;
+    switch (sortColumn) {
+      case 'apartment_number':
+        return ((a.apartment_number || 0) - (b.apartment_number || 0)) * dir;
+      case 'name':
+        return a.name.localeCompare(b.name, 'he') * dir;
+      case 'ownership_type':
+        return a.ownership_type.localeCompare(b.ownership_type, 'he') * dir;
+      case 'language':
+        return a.language.localeCompare(b.language) * dir;
+      case 'has_standing_order':
+        return ((a.has_standing_order ? 1 : 0) - (b.has_standing_order ? 1 : 0)) * dir;
+      case 'is_active':
+        return ((a.is_active ? 1 : 0) - (b.is_active ? 1 : 0)) * dir;
+      case 'expected_payment': {
+        const aV = a.expected_payment ?? a.building_expected_payment ?? 0;
+        const bV = b.expected_payment ?? b.building_expected_payment ?? 0;
+        return (aV - bV) * dir;
+      }
+      case 'total_debt': {
+        const aD = tenantDebts?.[a.id] ?? 0;
+        const bD = tenantDebts?.[b.id] ?? 0;
+        return (aD - bD) * dir;
+      }
+      case 'move_in_date':
+        return (a.move_in_date || '').localeCompare(b.move_in_date || '') * dir;
+      default:
+        return 0;
+    }
   });
 
   const invalidate = () => {
@@ -105,31 +159,11 @@ export default function Tenants() {
     }
   };
 
-  // Task 16: lazy-load debt for a tenant
-  const handleLoadDebt = async (tenantId: string) => {
-    setTenantDebts(prev => ({ ...prev, [tenantId]: 'loading' }));
-    try {
-      const history = await paymentsAPI.getTenantHistory(tenantId);
-      const debt = history.months.reduce(
-        (sum: number, m: { expected: number; paid: number }) =>
-          sum + Math.max(0, m.expected - m.paid),
-        0
-      );
-      setTenantDebts(prev => ({ ...prev, [tenantId]: Math.round(debt) }));
-    } catch {
-      setTenantDebts(prev => ({ ...prev, [tenantId]: 0 }));
-    }
-  };
-
   const OWNERSHIP_COLOR: Record<string, string> = {
     'בעלים': 'bg-blue-100 text-blue-800',
     'משכיר': 'bg-purple-100 text-purple-800',
     'שוכר': 'bg-green-100 text-green-800',
   };
-
-  const sorted = [...(tenants || [])].sort((a, b) =>
-    (a.apartment_number || 0) - (b.apartment_number || 0)
-  );
 
   return (
     <Layout>
@@ -170,7 +204,7 @@ export default function Tenants() {
             <div className="flex items-center justify-center h-40">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
             </div>
-          ) : sorted.length === 0 ? (
+          ) : (tenants?.length ?? 0) === 0 ? (
             <div className="text-center py-16">
               <div className="text-6xl mb-4">👥</div>
               <h3 className="text-xl font-bold text-gray-900 mb-2">אין דיירים עדיין</h3>
@@ -195,15 +229,55 @@ export default function Tenants() {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    {['דירה', 'שם', 'סוג בעלות', 'טלפון', 'בנק', 'שפה', 'ה.קבע', 'פעיל', 'תשלום צפוי', 'חוב כולל', 'תאריך כניסה', 'פעולות'].map(col => (
-                      <th key={col} className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        {col}
-                      </th>
-                    ))}
+                    <th onClick={() => handleSort('apartment_number')}
+                      className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                      דירה<SortIcon col="apartment_number" />
+                    </th>
+                    <th onClick={() => handleSort('name')}
+                      className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                      שם<SortIcon col="name" />
+                    </th>
+                    <th onClick={() => handleSort('ownership_type')}
+                      className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                      סוג בעלות<SortIcon col="ownership_type" />
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      טלפון
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      בנק
+                    </th>
+                    <th onClick={() => handleSort('language')}
+                      className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                      שפה<SortIcon col="language" />
+                    </th>
+                    <th onClick={() => handleSort('has_standing_order')}
+                      className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                      ה.קבע<SortIcon col="has_standing_order" />
+                    </th>
+                    <th onClick={() => handleSort('is_active')}
+                      className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                      פעיל<SortIcon col="is_active" />
+                    </th>
+                    <th onClick={() => handleSort('expected_payment')}
+                      className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                      תשלום צפוי<SortIcon col="expected_payment" />
+                    </th>
+                    <th onClick={() => handleSort('total_debt')}
+                      className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                      חוב כולל<SortIcon col="total_debt" />
+                    </th>
+                    <th onClick={() => handleSort('move_in_date')}
+                      className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                      תאריך כניסה<SortIcon col="move_in_date" />
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      פעולות
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
-                  {sorted.map(tenant => (
+                  {sortedTenants.map(tenant => (
                     <tr key={tenant.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3 text-sm font-bold text-gray-900">
                         {tenant.apartment_number || '—'}
@@ -299,21 +373,14 @@ export default function Tenants() {
                         )}
                       </td>
 
-                      {/* Task 16: חוב כולל (lazy-load) */}
+                      {/* חוב כולל (auto-loaded) */}
                       <td className="px-4 py-3 text-sm">
-                        {tenantDebts[tenant.id] === 'loading' ? (
-                          <span className="text-gray-400 text-xs">טוען...</span>
-                        ) : typeof tenantDebts[tenant.id] === 'number' ? (
-                          <span className={(tenantDebts[tenant.id] as number) > 0 ? 'text-red-600 font-medium' : 'text-green-600'}>
-                            ₪{(tenantDebts[tenant.id] as number).toLocaleString()}
-                          </span>
+                        {tenantDebts === undefined ? (
+                          <span className="text-gray-300 text-xs">טוען...</span>
                         ) : (
-                          <button
-                            onClick={() => handleLoadDebt(tenant.id)}
-                            className="text-xs text-blue-500 hover:text-blue-700 underline"
-                          >
-                            חשב
-                          </button>
+                          <span className={(tenantDebts[tenant.id] ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-green-500'}>
+                            ₪{Math.round(tenantDebts[tenant.id] ?? 0).toLocaleString()}
+                          </span>
                         )}
                       </td>
 
