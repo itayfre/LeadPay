@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, and_
 from typing import List, Optional
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, date
 from collections import defaultdict
 
 from ..database import get_db
@@ -229,7 +229,6 @@ def get_tenant_payment_history(
     Return month-by-month payment history for a tenant from move_in_date to current month.
     Each month includes summary + individual transactions (bank-statement and manual).
     """
-    from datetime import date
 
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
@@ -336,7 +335,6 @@ def get_tenant_debts(
     active tenant in a building. Single batch DB query — no N+1.
     Returns: { tenant_id: total_debt }
     """
-    from datetime import date
 
     building = db.query(Building).filter(Building.id == building_id).first()
     if not building:
@@ -366,7 +364,7 @@ def get_tenant_debts(
         .filter(
             Transaction.matched_tenant_id.in_(tenant_ids),
             Transaction.transaction_type == TransactionType.PAYMENT,
-            Transaction.credit_amount != None,
+            Transaction.credit_amount.isnot(None),
         )
         .all()
     )
