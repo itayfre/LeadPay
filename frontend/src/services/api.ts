@@ -73,6 +73,9 @@ export const paymentsAPI = {
 
   getTenantHistory: (tenantId: string) =>
     fetchAPI<TenantPaymentHistory>(`/api/v1/payments/tenant/${tenantId}/history`),
+
+  getTenantDebts: (buildingId: string) =>
+    fetchAPI<Record<string, number>>(`/api/v1/payments/${buildingId}/tenant-debts`),
 };
 
 // Statements API
