@@ -328,7 +328,7 @@ def get_tenant_payment_history(
 
 @router.get("/{building_id}/tenant-debts")
 def get_tenant_debts(
-    building_id: str,
+    building_id: UUID,
     db: Session = Depends(get_db)
 ):
     """
@@ -377,7 +377,10 @@ def get_tenant_debts(
         if stmt is not None:
             key = (stmt.period_year, stmt.period_month)
         else:
-            key = (txn.activity_date.year, txn.activity_date.month)
+            act_date = txn.activity_date
+            if hasattr(act_date, "date"):
+                act_date = act_date.date()
+            key = (act_date.year, act_date.month)
         historical[str(txn.matched_tenant_id)][key] += float(txn.credit_amount or 0)
 
     result = {}
