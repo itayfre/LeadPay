@@ -92,9 +92,23 @@ async def upload_bank_statement(
     # Create transaction records
     matched_count = 0
     unmatched_count = 0
+    skipped_count = 0
     payment_transactions = []
 
     for trans_data in transactions_data:
+        # Deduplication: skip if this reference_number already exists in the DB
+        ref_num = trans_data.get('reference_number', '')
+        if ref_num:
+            existing = db.query(Transaction).join(
+                BankStatement, Transaction.statement_id == BankStatement.id
+            ).filter(
+                Transaction.reference_number == ref_num,
+                BankStatement.building_id == building_id
+            ).first()
+            if existing:
+                skipped_count += 1
+                continue
+
         # Create transaction
         transaction = Transaction(
             statement_id=bank_statement.id,
@@ -149,6 +163,7 @@ async def upload_bank_statement(
         "payment_transactions": len(payment_transactions),
         "matched": matched_count,
         "unmatched": unmatched_count,
+        "skipped_duplicates": skipped_count,
         "match_rate": f"{(matched_count / len(payment_transactions) * 100):.1f}%" if payment_transactions else "N/A"
     }
 
