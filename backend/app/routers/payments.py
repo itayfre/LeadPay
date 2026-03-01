@@ -325,6 +325,71 @@ def get_tenant_payment_history(
         "months": result_months,
     }
 
+
+@router.get("/{building_id}/tenant-debts")
+def get_tenant_debts(
+    building_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Return cumulative all-time debt (from move_in_date to today) for every
+    active tenant in a building. Single batch DB query — no N+1.
+    Returns: { tenant_id: total_debt }
+    """
+    from datetime import date
+
+    building = db.query(Building).filter(Building.id == building_id).first()
+    if not building:
+        raise HTTPException(status_code=404, detail="Building not found")
+
+    # All active tenants with apartments
+    tenants_query = (
+        db.query(Tenant, Apartment)
+        .join(Apartment, Tenant.apartment_id == Apartment.id)
+        .filter(
+            Apartment.building_id == building_id,
+            Tenant.is_active == True
+        )
+        .all()
+    )
+
+    if not tenants_query:
+        return {}
+
+    tenant_ids = [t.id for t, _ in tenants_query]
+    today = date.today()
+
+    # Batch-fetch ALL historical payment transactions for this building's tenants
+    all_txns = (
+        db.query(Transaction, BankStatement)
+        .outerjoin(BankStatement, Transaction.statement_id == BankStatement.id)
+        .filter(
+            Transaction.matched_tenant_id.in_(tenant_ids),
+            Transaction.transaction_type == TransactionType.PAYMENT,
+            Transaction.credit_amount != None,
+        )
+        .all()
+    )
+
+    # Group by tenant_id → {(year, month) → total_paid}
+    historical = defaultdict(lambda: defaultdict(float))
+    for txn, stmt in all_txns:
+        if stmt is not None:
+            key = (stmt.period_year, stmt.period_month)
+        else:
+            key = (txn.activity_date.year, txn.activity_date.month)
+        historical[str(txn.matched_tenant_id)][key] += float(txn.credit_amount or 0)
+
+    result = {}
+    for tenant, apartment in tenants_query:
+        result[str(tenant.id)] = _calculate_tenant_debt_from_map(
+            tenant, apartment, building,
+            dict(historical.get(str(tenant.id), {})),
+            today.month, today.year
+        )
+
+    return result
+
 @router.get("/{building_id}/status")
 def get_payment_status(
     building_id: UUID,
