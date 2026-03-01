@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Layout from '../components/layout/Layout';
@@ -7,6 +7,20 @@ import TenantImportModal from '../components/modals/TenantImportModal';
 import ConfirmDialog from '../components/modals/ConfirmDialog';
 import { buildingsAPI, tenantsAPI, apartmentsAPI, paymentsAPI } from '../services/api';
 import type { Tenant } from '../types';
+
+const SortIcon = ({
+  col,
+  sortColumn,
+  sortDirection,
+}: {
+  col: string;
+  sortColumn: string;
+  sortDirection: 'asc' | 'desc';
+}) => (
+  <span className={`ml-1 text-xs ${sortColumn === col ? 'text-blue-600' : 'text-gray-300'}`}>
+    {sortColumn === col ? (sortDirection === 'asc' ? '▲' : '▼') : '⇅'}
+  </span>
+);
 
 export default function Tenants() {
   const { buildingId } = useParams<{ buildingId: string }>();
@@ -59,13 +73,7 @@ export default function Tenants() {
     }
   };
 
-  const SortIcon = ({ col }: { col: string }) => (
-    <span className={`ml-1 text-xs ${sortColumn === col ? 'text-blue-600' : 'text-gray-300'}`}>
-      {sortColumn === col ? (sortDirection === 'asc' ? '▲' : '▼') : '⇅'}
-    </span>
-  );
-
-  const sortedTenants = [...(tenants || [])].sort((a, b) => {
+  const sortedTenants = useMemo(() => [...(tenants || [])].sort((a, b) => {
     const dir = sortDirection === 'asc' ? 1 : -1;
     switch (sortColumn) {
       case 'apartment_number':
@@ -95,7 +103,7 @@ export default function Tenants() {
       default:
         return 0;
     }
-  });
+  }), [tenants, sortColumn, sortDirection, tenantDebts]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['tenants', buildingId] });
@@ -231,15 +239,15 @@ export default function Tenants() {
                   <tr>
                     <th onClick={() => handleSort('apartment_number')}
                       className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
-                      דירה<SortIcon col="apartment_number" />
+                      דירה<SortIcon col="apartment_number" sortColumn={sortColumn} sortDirection={sortDirection} />
                     </th>
                     <th onClick={() => handleSort('name')}
                       className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
-                      שם<SortIcon col="name" />
+                      שם<SortIcon col="name" sortColumn={sortColumn} sortDirection={sortDirection} />
                     </th>
                     <th onClick={() => handleSort('ownership_type')}
                       className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
-                      סוג בעלות<SortIcon col="ownership_type" />
+                      סוג בעלות<SortIcon col="ownership_type" sortColumn={sortColumn} sortDirection={sortDirection} />
                     </th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                       טלפון
@@ -249,27 +257,28 @@ export default function Tenants() {
                     </th>
                     <th onClick={() => handleSort('language')}
                       className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
-                      שפה<SortIcon col="language" />
+                      שפה<SortIcon col="language" sortColumn={sortColumn} sortDirection={sortDirection} />
                     </th>
                     <th onClick={() => handleSort('has_standing_order')}
                       className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
-                      ה.קבע<SortIcon col="has_standing_order" />
+                      ה.קבע<SortIcon col="has_standing_order" sortColumn={sortColumn} sortDirection={sortDirection} />
                     </th>
                     <th onClick={() => handleSort('is_active')}
                       className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
-                      פעיל<SortIcon col="is_active" />
+                      פעיל<SortIcon col="is_active" sortColumn={sortColumn} sortDirection={sortDirection} />
                     </th>
                     <th onClick={() => handleSort('expected_payment')}
                       className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
-                      תשלום צפוי<SortIcon col="expected_payment" />
+                      תשלום צפוי<SortIcon col="expected_payment" sortColumn={sortColumn} sortDirection={sortDirection} />
                     </th>
-                    <th onClick={() => handleSort('total_debt')}
-                      className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
-                      חוב כולל<SortIcon col="total_debt" />
+                    <th
+                      onClick={tenantDebts !== undefined ? () => handleSort('total_debt') : undefined}
+                      className={`px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider select-none ${tenantDebts !== undefined ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default opacity-60'}`}>
+                      חוב כולל{tenantDebts !== undefined && <SortIcon col="total_debt" sortColumn={sortColumn} sortDirection={sortDirection} />}
                     </th>
                     <th onClick={() => handleSort('move_in_date')}
                       className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
-                      תאריך כניסה<SortIcon col="move_in_date" />
+                      תאריך כניסה<SortIcon col="move_in_date" sortColumn={sortColumn} sortDirection={sortDirection} />
                     </th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                       פעולות
