@@ -96,18 +96,35 @@ async def upload_bank_statement(
     payment_transactions = []
 
     for trans_data in transactions_data:
-        # Deduplication: skip if this reference_number already exists in the DB
+        # Deduplication: skip if this transaction already exists in the DB
         ref_num = trans_data.get('reference_number', '')
         if ref_num:
+            # Primary: deduplicate by reference number (אסמכתא)
             existing = db.query(Transaction).join(
                 BankStatement, Transaction.statement_id == BankStatement.id
             ).filter(
                 Transaction.reference_number == ref_num,
                 BankStatement.building_id == building_id
             ).first()
-            if existing:
-                skipped_count += 1
-                continue
+        else:
+            # Fallback: deduplicate by date + amount + description
+            credit_val = trans_data.get('credit_amount')
+            credit_filter = (
+                Transaction.credit_amount.is_(None)
+                if credit_val is None
+                else Transaction.credit_amount == credit_val
+            )
+            existing = db.query(Transaction).join(
+                BankStatement, Transaction.statement_id == BankStatement.id
+            ).filter(
+                Transaction.activity_date == trans_data['activity_date'],
+                credit_filter,
+                Transaction.description == trans_data['description'],
+                BankStatement.building_id == building_id
+            ).first()
+        if existing:
+            skipped_count += 1
+            continue
 
         # Create transaction
         transaction = Transaction(
