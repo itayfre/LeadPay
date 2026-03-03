@@ -8,7 +8,6 @@ This session completed 6 major feature implementations:
 2. ✅ Unique constraint for building names
 3. ✅ Building delete with confirmation
 4. ✅ Building edit modal
-5. ✅ Mapbox integration
 6. ✅ WhatsApp template editor
 
 ---
@@ -95,42 +94,7 @@ This session completed 6 major feature implementations:
 
 ---
 
-## 5. Mapbox Integration
-
-### Features
-- **Interactive Map**: Full Mapbox GL JS integration
-- **Building Markers**: Custom 🏢 icons at each location
-- **Popups**: Click markers to see details
-  - Building name
-  - Address
-  - Tenant count
-- **Navigation**: Click marker to go to dashboard
-- **Demo Coordinates**: Tel Aviv area for testing
-- **Setup Guide**: Clear instructions when token missing
-
-### Setup Required
-Add to `frontend/.env`:
-```bash
-VITE_MAPBOX_TOKEN=your_token_here
-```
-
-Get free token at: https://mapbox.com
-
-### Production Notes
-For real coordinates, you need to:
-1. Add `latitude` and `longitude` columns to Building model
-2. Integrate geocoding service (Mapbox, Google Maps, or Nominatim)
-3. Geocode addresses when creating buildings
-4. Update Map component to use real coordinates
-
-### Current Behavior
-- Uses demo coordinates in Tel Aviv area
-- 4 coordinate points cycled for all buildings
-- Fully functional for testing UI/UX
-
----
-
-## 6. WhatsApp Template Editor
+## 5. WhatsApp Template Editor
 
 ### Features
 - **4 Template Types**:
@@ -179,12 +143,11 @@ Currently stores templates in browser state. To persist:
 - **Success Feedback**: Toast notifications and inline confirmations
 
 ### Sidebar Navigation
-- **5 Main Routes**:
+- **4 Main Routes**:
   1. Buildings (🏢)
-  2. Map (🗺️)
-  3. Statements Upload (📄)
-  4. Messages (💬)
-  5. Settings (⚙️)
+  2. Statements Upload (📄)
+  3. Messages (💬)
+  4. Settings (⚙️)
 - **Mobile Responsive**: Hamburger menu with overlay
 - **Active States**: Visual current page indication
 - **Help Section**: Support card at bottom
@@ -198,13 +161,6 @@ Currently stores templates in browser state. To persist:
 
 ## Technical Details
 
-### New Dependencies
-```json
-{
-  "mapbox-gl": "^3.x.x"
-}
-```
-
 ### New Components
 1. `TenantImport.tsx` - Upload interface
 2. `ConfirmDialog.tsx` - Reusable confirmation
@@ -214,8 +170,7 @@ Currently stores templates in browser state. To persist:
 
 ### New Pages
 1. `StatementsUpload.tsx` - Bulk statement upload
-2. `Map.tsx` - Mapbox integration
-3. `Messages.tsx` - Message history (placeholder)
+2. `Messages.tsx` - Message history (placeholder)
 4. `Settings.tsx` - Settings hub
 5. `WhatsAppTemplates.tsx` - Template editor
 
@@ -242,14 +197,6 @@ Currently stores templates in browser state. To persist:
 - [ ] Statistics cards calculate correctly
 - [ ] WhatsApp reminders generate
 
-### Map
-- [ ] Map loads (if token configured)
-- [ ] Setup guide shows (if no token)
-- [ ] Markers appear for buildings
-- [ ] Popups show correct info
-- [ ] Click marker navigates to dashboard
-- [ ] Buildings list clickable
-
 ### WhatsApp Templates
 - [ ] All 4 template types visible
 - [ ] Hebrew and English versions
@@ -268,13 +215,6 @@ Currently stores templates in browser state. To persist:
 ---
 
 ## Known Limitations & Future Work
-
-### Map
-- Uses demo coordinates (Tel Aviv area)
-- Production needs:
-  - Geocoding service integration
-  - Latitude/longitude in database
-  - Auto-geocode on building creation
 
 ### WhatsApp Templates
 - Currently browser-state only (not persisted)
@@ -305,14 +245,12 @@ DATABASE_URL=postgresql://user:pass@host:6543/leadpay
 
 # Frontend (.env)
 VITE_API_URL=http://localhost:8000
-VITE_MAPBOX_TOKEN=pk.your_token_here  # Optional
 ```
 
 ### Production Checklist
 1. Set up PostgreSQL (Supabase recommended)
 2. Run migrations: `alembic upgrade head`
-3. Get Mapbox token (optional): https://mapbox.com
-4. Deploy backend to Railway/Render/Fly.io
+3. Deploy backend to Railway/Render/Fly.io
 5. Build frontend: `npm run build`
 6. Deploy frontend to Vercel/Netlify/Cloudflare Pages
 7. Update CORS settings in FastAPI
