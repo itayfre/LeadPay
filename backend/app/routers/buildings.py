@@ -4,6 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 from typing import List
 from uuid import UUID
+from collections import defaultdict
 
 from ..database import get_db
 from ..models import Building, Apartment, Tenant
@@ -40,8 +41,24 @@ def create_building(building: BuildingCreate, db: Session = Depends(get_db)):
         )
 
 
+def _building_row(building: Building, tenant_count: int, total_expected: float) -> dict:
+    """Serialize a Building dict from pre-computed counts."""
+    return {
+        "id": str(building.id),
+        "name": building.name,
+        "address": building.address,
+        "city": building.city,
+        "bank_account_number": building.bank_account_number,
+        "total_tenants": tenant_count,
+        "expected_monthly_payment": float(building.expected_monthly_payment) if building.expected_monthly_payment else None,
+        "total_expected_monthly": total_expected,
+        "created_at": building.created_at.isoformat() if building.created_at else None,
+        "updated_at": building.updated_at.isoformat() if building.updated_at else None,
+    }
+
+
 def _building_with_live_count(building: Building, db: Session) -> dict:
-    """Serialize a Building with live tenant count and computed expected monthly total."""
+    """Serialize a single Building with live tenant count and computed expected monthly total."""
     count = (
         db.query(func.count(Tenant.id))
         .join(Apartment, Tenant.apartment_id == Apartment.id)
@@ -52,16 +69,11 @@ def _building_with_live_count(building: Building, db: Session) -> dict:
     # Sum expected payment per APARTMENT (not per tenant) to avoid double-counting
     # apartments that have multiple active tenants (e.g., owner + renter).
     building_default = float(building.expected_monthly_payment or 0)
-    active_apt_ids = (
-        db.query(Apartment.id)
-        .join(Tenant, Tenant.apartment_id == Apartment.id)
-        .filter(Apartment.building_id == building.id, Tenant.is_active == True)
-        .distinct()
-        .subquery()
-    )
     apartments_with_active_tenants = (
         db.query(Apartment)
-        .filter(Apartment.id.in_(active_apt_ids))
+        .join(Tenant, Tenant.apartment_id == Apartment.id)
+        .filter(Apartment.building_id == building.id, Tenant.is_active == True)
+        .distinct(Apartment.id)
         .all()
     )
     total_expected_monthly = sum(
@@ -69,25 +81,51 @@ def _building_with_live_count(building: Building, db: Session) -> dict:
         for apt in apartments_with_active_tenants
     )
 
-    return {
-        "id": str(building.id),
-        "name": building.name,
-        "address": building.address,
-        "city": building.city,
-        "bank_account_number": building.bank_account_number,
-        "total_tenants": count,
-        "expected_monthly_payment": float(building.expected_monthly_payment) if building.expected_monthly_payment else None,
-        "total_expected_monthly": total_expected_monthly,
-        "created_at": building.created_at.isoformat() if building.created_at else None,
-        "updated_at": building.updated_at.isoformat() if building.updated_at else None,
-    }
+    return _building_row(building, count, total_expected_monthly)
 
 
 @router.get("/", response_model=List[dict])
 def list_buildings(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """Get all buildings with live tenant counts"""
+    """Get all buildings with live tenant counts — uses bulk queries to avoid N+1."""
     buildings = db.query(Building).offset(skip).limit(limit).all()
-    return [_building_with_live_count(b, db) for b in buildings]
+    if not buildings:
+        return []
+
+    building_ids = [b.id for b in buildings]
+
+    # Bulk query 1: active tenant count per building
+    tenant_counts = dict(
+        db.query(Apartment.building_id, func.count(func.distinct(Tenant.id)))
+        .join(Tenant, Tenant.apartment_id == Apartment.id)
+        .filter(Apartment.building_id.in_(building_ids), Tenant.is_active == True)
+        .group_by(Apartment.building_id)
+        .all()
+    )
+
+    # Bulk query 2: distinct active apartments per building (for expected payment sum)
+    apt_rows = (
+        db.query(Apartment.building_id, Apartment.id, Apartment.expected_payment)
+        .join(Tenant, Tenant.apartment_id == Apartment.id)
+        .filter(Apartment.building_id.in_(building_ids), Tenant.is_active == True)
+        .distinct(Apartment.building_id, Apartment.id)
+        .all()
+    )
+
+    # Group apartment expected_payments by building_id
+    apt_payments: dict = defaultdict(list)
+    for bid, _apt_id, ep in apt_rows:
+        apt_payments[bid].append(ep)
+
+    result = []
+    for b in buildings:
+        building_default = float(b.expected_monthly_payment or 0)
+        total_expected = sum(
+            float(ep) if ep is not None else building_default
+            for ep in apt_payments.get(b.id, [])
+        )
+        result.append(_building_row(b, tenant_counts.get(b.id, 0), total_expected))
+
+    return result
 
 
 @router.get("/{building_id}", response_model=dict)

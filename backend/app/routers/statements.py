@@ -98,7 +98,11 @@ async def upload_bank_statement(
     for trans_data in transactions_data:
         # Deduplication: skip if this transaction already exists in the DB
         ref_num = trans_data.get('reference_number', '')
-        if ref_num:
+        # Only use reference number as a dedup key if it's meaningful (> 4 chars).
+        # Short/generic values like "1", "0", "null" appear on checks and cash deposits
+        # and repeat across different transactions — using them would wrongly skip real entries.
+        use_ref_num = ref_num and len(str(ref_num).strip()) > 4
+        if use_ref_num:
             # Primary: deduplicate by reference number (אסמכתא)
             existing = db.query(Transaction).join(
                 BankStatement, Transaction.statement_id == BankStatement.id
@@ -123,7 +127,14 @@ async def upload_bank_statement(
                 BankStatement.building_id == building_id
             ).first()
         if existing:
-            skipped_count += 1
+            # Only skip truly confirmed transactions (matched + approved by user).
+            # Unmatched/unconfirmed duplicates are skipped from re-insertion too,
+            # but they will surface in the building-wide unmatched review.
+            if existing.is_confirmed or existing.matched_tenant_id:
+                skipped_count += 1
+                continue
+            # Unmatched duplicate: skip inserting but don't count as skipped
+            # (it will appear in the building-wide unmatched review)
             continue
 
         # Create transaction
@@ -207,10 +218,24 @@ def get_statement_review(
             detail=f"Bank statement with id {statement_id} not found"
         )
 
-    # Load all transactions for the statement
-    transactions = db.query(Transaction).filter(
+    # Load transactions for this statement (matched + irrelevant)
+    statement_transactions = db.query(Transaction).filter(
         Transaction.statement_id == statement_id
     ).order_by(Transaction.activity_date).all()
+
+    # Load ALL unmatched payment transactions for the building (across all statements).
+    # This ensures previously uploaded but unmatched transactions are always surfaced.
+    all_unmatched_transactions = (
+        db.query(Transaction)
+        .join(BankStatement, Transaction.statement_id == BankStatement.id)
+        .filter(
+            BankStatement.building_id == statement.building_id,
+            Transaction.matched_tenant_id == None,
+            Transaction.transaction_type == TransactionType.PAYMENT,
+        )
+        .order_by(Transaction.activity_date)
+        .all()
+    )
 
     # Load active tenants for suggestion engine
     tenants = db.query(Tenant).join(Apartment).filter(
@@ -232,7 +257,8 @@ def get_statement_review(
     unmatched = []
     irrelevant = []
 
-    for t in transactions:
+    # Process current statement for matched + irrelevant
+    for t in statement_transactions:
         payer_name = parser._extract_payer_name(t.description) or ''
         base = {
             'id': str(t.id),
@@ -245,10 +271,8 @@ def get_statement_review(
         }
 
         if t.transaction_type and t.transaction_type.value != 'payment':
-            # Irrelevant: fees, transfers, other
             irrelevant.append(base)
         elif t.matched_tenant_id:
-            # Auto-matched
             matched.append({
                 **base,
                 'tenant_name': tenant_map.get(str(t.matched_tenant_id), ''),
@@ -256,16 +280,31 @@ def get_statement_review(
                 'match_method': t.match_method.value if t.match_method else None,
                 'is_confirmed': t.is_confirmed,
             })
-        else:
-            # Unmatched payment — generate top 3 suggestions
-            suggestions = []
-            if payer_name and tenants_dict:
-                raw_suggestions = matcher.suggest_matches(payer_name, tenants_dict, top_n=3)
-                suggestions = [
-                    {'tenant_id': s[0], 'tenant_name': s[2], 'score': round(s[1], 2)}
-                    for s in raw_suggestions
-                ]
-            unmatched.append({**base, 'suggestions': suggestions})
+        # Unmatched from the current statement will be included via all_unmatched_transactions below
+
+    # Build unmatched list from ALL building-wide unmatched payment transactions
+    seen_ids = {t['id'] for t in matched}  # avoid double-counting if statement overlaps
+    for t in all_unmatched_transactions:
+        if str(t.id) in seen_ids:
+            continue
+        payer_name = parser._extract_payer_name(t.description) or ''
+        suggestions = []
+        if payer_name and tenants_dict:
+            raw_suggestions = matcher.suggest_matches(payer_name, tenants_dict, top_n=3)
+            suggestions = [
+                {'tenant_id': s[0], 'tenant_name': s[2], 'score': round(s[1], 2)}
+                for s in raw_suggestions
+            ]
+        unmatched.append({
+            'id': str(t.id),
+            'activity_date': t.activity_date.isoformat(),
+            'description': t.description,
+            'payer_name': payer_name,
+            'credit_amount': float(t.credit_amount) if t.credit_amount else None,
+            'debit_amount': float(t.debit_amount) if t.debit_amount else None,
+            'transaction_type': t.transaction_type.value if t.transaction_type else 'other',
+            'suggestions': suggestions,
+        })
 
     # All tenants list (for manual selection dropdown in UI)
     all_tenants = [

@@ -1,13 +1,16 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Layout from '../components/layout/Layout';
 import { buildingsAPI, statementsAPI } from '../services/api';
+import UploadReviewModal from '../components/modals/UploadReviewModal';
 
 export default function StatementsUpload() {
+  const queryClient = useQueryClient();
   const [selectedBuilding, setSelectedBuilding] = useState<string>('');
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadResults, setUploadResults] = useState<any[]>([]);
+  const [reviewStatementId, setReviewStatementId] = useState<string | null>(null);
 
   // Fetch all buildings
   const { data: buildings } = useQuery({
@@ -50,12 +53,17 @@ export default function StatementsUpload() {
 
     setUploading(true);
     const results = [];
+    let firstStatementId: string | null = null;
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       try {
         const result = await statementsAPI.upload(selectedBuilding, file);
         results.push({ file: file.name, success: true, result });
+        // Open review modal for the first successfully uploaded file
+        if (!firstStatementId && result.statement_id) {
+          firstStatementId = result.statement_id;
+        }
       } catch (error) {
         results.push({ file: file.name, success: false, error: (error as Error).message });
       }
@@ -63,6 +71,11 @@ export default function StatementsUpload() {
 
     setUploadResults(results);
     setUploading(false);
+    queryClient.invalidateQueries({ queryKey: ['paymentStatus', selectedBuilding] });
+
+    if (firstStatementId) {
+      setReviewStatementId(firstStatementId);
+    }
   };
 
   return (
@@ -225,6 +238,15 @@ export default function StatementsUpload() {
           </ul>
         </div>
       </div>
+
+      {/* Review Modal — opens automatically after successful upload */}
+      {reviewStatementId && selectedBuilding && (
+        <UploadReviewModal
+          statementId={reviewStatementId}
+          buildingId={selectedBuilding}
+          onClose={() => setReviewStatementId(null)}
+        />
+      )}
     </Layout>
   );
 }
