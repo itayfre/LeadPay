@@ -161,3 +161,37 @@ export interface BankStatement {
   upload_date: string;
   transaction_count: number;
 }
+
+// --- Upload Review Modal types ---
+
+export interface MatchSuggestion {
+  tenant_id: string;
+  tenant_name: string;
+  score: number;
+}
+
+export interface ReviewTransaction {
+  id: string;
+  activity_date: string;
+  description: string;
+  payer_name?: string;
+  credit_amount?: number;
+  debit_amount?: number;
+  transaction_type: string;
+  // matched only:
+  tenant_name?: string;
+  match_confidence?: number;
+  match_method?: string;
+  is_confirmed?: boolean;
+  // unmatched only:
+  suggestions?: MatchSuggestion[];
+}
+
+export interface StatementReview {
+  statement_id: string;
+  period: string;
+  matched: ReviewTransaction[];
+  unmatched: ReviewTransaction[];
+  irrelevant: ReviewTransaction[];
+  all_tenants: MatchSuggestion[];
+}

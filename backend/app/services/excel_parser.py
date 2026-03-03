@@ -16,6 +16,7 @@ class BankStatementParser:
     BANK_NAMES = [
         'הפועלים', 'לאומי', 'דיסקונט', 'מזרחי', 'בינלאומי',
         'פועלים', 'איגוד', 'מרכנתיל', 'יהב', 'אוצר החייל',
+        'אוצר-החייל', 'אוצר-חיל', 'אוצר החיל',
         'בנק', 'Bank'
     ]
 
@@ -40,7 +41,8 @@ class BankStatementParser:
     def parse_excel(
         self,
         file_content: bytes,
-        filename: str
+        filename: str,
+        return_all: bool = False
     ) -> Tuple[List[Dict], Dict]:
         """
         Parse bank statement Excel file
@@ -48,6 +50,8 @@ class BankStatementParser:
         Args:
             file_content: Binary content of Excel file
             filename: Original filename
+            return_all: If True, return all transactions including fees/transfers.
+                        If False (default), filter to payment transactions only.
 
         Returns:
             Tuple of (transactions list, metadata dict)
@@ -64,8 +68,9 @@ class BankStatementParser:
         # Parse transactions
         transactions = self._parse_transactions(df)
 
-        # Filter out fees and summary rows
-        transactions = self._filter_transactions(transactions)
+        # Filter out fees and summary rows (unless caller wants everything)
+        if not return_all:
+            transactions = self._filter_transactions(transactions)
 
         return transactions, metadata
 
@@ -208,13 +213,20 @@ class BankStatementParser:
         description = ' '.join(description.split())
 
         # Look for pattern: bank name - payer name
-        # Try to find the separator
-        if ' - ' in description or '-' in description:
-            parts = re.split(r'\s*-\s*', description, maxsplit=1)
+        # First try spaced separator " - " to avoid splitting bank names with hyphens
+        # e.g., "אוצר-חיל - זינגר עמית" should split as ["אוצר-חיל", "זינגר עמית"]
+        if ' - ' in description:
+            parts = description.split(' - ', 1)
             if len(parts) == 2:
-                bank_part, name_part = parts
-                # Clean the name part
-                name = name_part.strip()
+                name = parts[1].strip()
+                return name if name else None
+
+        # Fallback: try splitting on "-" with optional whitespace
+        # But skip if the "-" is between two Hebrew chars (likely part of a word/name)
+        if '-' in description:
+            parts = re.split(r'(?<!\S)-\s+|\s+-(?!\S)', description, maxsplit=1)
+            if len(parts) == 2:
+                name = parts[1].strip()
                 return name if name else None
 
         # If no separator, try to remove known bank names

@@ -1,4 +1,4 @@
-import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, BankStatement, Transaction, TenantPaymentHistory, ManualPaymentRequest } from '../types';
+import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, BankStatement, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -102,6 +102,21 @@ export const statementsAPI = {
 
   getTransactions: (statementId: string) =>
     fetchAPI<{ transactions: Transaction[] }>(`/api/v1/statements/${statementId}/transactions`),
+
+  getReview: (statementId: string) =>
+    fetchAPI<StatementReview>(`/api/v1/statements/${statementId}/review`),
+
+  manualMatch: async (transactionId: string, tenantId: string) => {
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/statements/transactions/${transactionId}/match/${tenantId}`,
+      { method: 'POST' }
+    );
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Match failed' }));
+      throw new Error(error.detail || 'Match failed');
+    }
+    return response.json();
+  },
 };
 
 // Messages API

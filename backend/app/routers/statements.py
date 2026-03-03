@@ -46,10 +46,10 @@ async def upload_bank_statement(
             detail=f"Failed to read file: {str(e)}"
         )
 
-    # Parse the Excel file
+    # Parse the Excel file (return_all=True so fees/transfers are saved for review UI)
     parser = BankStatementParser()
     try:
-        transactions_data, metadata = parser.parse_excel(contents, file.filename)
+        transactions_data, metadata = parser.parse_excel(contents, file.filename, return_all=True)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -149,7 +149,12 @@ async def upload_bank_statement(
             if tenant_id:
                 transaction.matched_tenant_id = UUID(tenant_id)
                 transaction.match_confidence = confidence
-                transaction.match_method = MatchMethod(method)
+                # Safe fallback: new engine methods (token_based, family_name) may not
+                # be in the MatchMethod enum yet — map unknown methods to FUZZY
+                try:
+                    transaction.match_method = MatchMethod(method)
+                except ValueError:
+                    transaction.match_method = MatchMethod.FUZZY
                 # Auto-confirm high confidence matches
                 transaction.is_confirmed = confidence >= 0.9
                 matched_count += 1
@@ -182,6 +187,99 @@ async def upload_bank_statement(
         "unmatched": unmatched_count,
         "skipped_duplicates": skipped_count,
         "match_rate": f"{(matched_count / len(payment_transactions) * 100):.1f}%" if payment_transactions else "N/A"
+    }
+
+
+@router.get("/{statement_id}/review")
+def get_statement_review(
+    statement_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """
+    Get a grouped review of all transactions in a statement.
+    Returns matched, unmatched (with engine suggestions), and irrelevant transactions.
+    Used to power the post-upload review modal.
+    """
+    statement = db.query(BankStatement).filter(BankStatement.id == statement_id).first()
+    if not statement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Bank statement with id {statement_id} not found"
+        )
+
+    # Load all transactions for the statement
+    transactions = db.query(Transaction).filter(
+        Transaction.statement_id == statement_id
+    ).order_by(Transaction.activity_date).all()
+
+    # Load active tenants for suggestion engine
+    tenants = db.query(Tenant).join(Apartment).filter(
+        Apartment.building_id == statement.building_id,
+        Tenant.is_active == True
+    ).all()
+    tenants_dict = [
+        {'id': str(t.id), 'name': t.name, 'full_name': t.full_name or t.name}
+        for t in tenants
+    ]
+
+    # Tenant lookup by id for matched group
+    tenant_map = {str(t.id): t.name for t in tenants}
+
+    matcher = NameMatchingEngine(confidence_threshold=0.7)
+    parser = BankStatementParser()
+
+    matched = []
+    unmatched = []
+    irrelevant = []
+
+    for t in transactions:
+        payer_name = parser._extract_payer_name(t.description) or ''
+        base = {
+            'id': str(t.id),
+            'activity_date': t.activity_date.isoformat(),
+            'description': t.description,
+            'payer_name': payer_name,
+            'credit_amount': float(t.credit_amount) if t.credit_amount else None,
+            'debit_amount': float(t.debit_amount) if t.debit_amount else None,
+            'transaction_type': t.transaction_type.value if t.transaction_type else 'other',
+        }
+
+        if t.transaction_type and t.transaction_type.value != 'payment':
+            # Irrelevant: fees, transfers, other
+            irrelevant.append(base)
+        elif t.matched_tenant_id:
+            # Auto-matched
+            matched.append({
+                **base,
+                'tenant_name': tenant_map.get(str(t.matched_tenant_id), ''),
+                'match_confidence': t.match_confidence,
+                'match_method': t.match_method.value if t.match_method else None,
+                'is_confirmed': t.is_confirmed,
+            })
+        else:
+            # Unmatched payment — generate top 3 suggestions
+            suggestions = []
+            if payer_name and tenants_dict:
+                raw_suggestions = matcher.suggest_matches(payer_name, tenants_dict, top_n=3)
+                suggestions = [
+                    {'tenant_id': s[0], 'tenant_name': s[2], 'score': round(s[1], 2)}
+                    for s in raw_suggestions
+                ]
+            unmatched.append({**base, 'suggestions': suggestions})
+
+    # All tenants list (for manual selection dropdown in UI)
+    all_tenants = [
+        {'tenant_id': str(t.id), 'tenant_name': t.name}
+        for t in tenants
+    ]
+
+    return {
+        'statement_id': str(statement_id),
+        'period': f"{statement.period_month}/{statement.period_year}",
+        'matched': matched,
+        'unmatched': unmatched,
+        'irrelevant': irrelevant,
+        'all_tenants': all_tenants,
     }
 
 
