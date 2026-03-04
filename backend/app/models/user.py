@@ -26,8 +26,14 @@ class User(Base):
     email = Column(String, unique=True, nullable=False, index=True)
     hashed_password = Column(String, nullable=True)  # null until invite accepted
     full_name = Column(String, nullable=False)
-    role = Column(Enum(UserRole), default=UserRole.VIEWER, nullable=False)
-    status = Column(Enum(UserStatus), default=UserStatus.ACTIVE, nullable=False)
+    role = Column(
+        Enum(UserRole, values_callable=lambda x: [e.value for e in x]),
+        default=UserRole.VIEWER, nullable=False
+    )
+    status = Column(
+        Enum(UserStatus, values_callable=lambda x: [e.value for e in x]),
+        default=UserStatus.ACTIVE, nullable=False
+    )
     building_id = Column(UUID(as_uuid=True), ForeignKey("buildings.id", ondelete="SET NULL"), nullable=True)
     invite_token = Column(String, nullable=True)
     invite_expires_at = Column(DateTime, nullable=True)
