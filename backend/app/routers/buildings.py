@@ -8,7 +8,9 @@ from collections import defaultdict
 
 from ..database import get_db
 from ..models import Building, Apartment, Tenant
+from ..models.user import User
 from ..schemas import BuildingCreate, BuildingUpdate, BuildingResponse
+from ..dependencies.auth import require_manager, require_worker_plus, require_any_auth
 
 router = APIRouter(
     prefix="/api/v1/buildings",
@@ -17,7 +19,11 @@ router = APIRouter(
 
 
 @router.post("/", response_model=BuildingResponse, status_code=status.HTTP_201_CREATED)
-def create_building(building: BuildingCreate, db: Session = Depends(get_db)):
+def create_building(
+    building: BuildingCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
+):
     """Create a new building"""
     # Check if building with same name already exists
     existing = db.query(Building).filter(Building.name == building.name).first()
@@ -85,7 +91,12 @@ def _building_with_live_count(building: Building, db: Session) -> dict:
 
 
 @router.get("/", response_model=List[dict])
-def list_buildings(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def list_buildings(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_any_auth),
+):
     """Get all buildings with live tenant counts — uses bulk queries to avoid N+1."""
     buildings = db.query(Building).offset(skip).limit(limit).all()
     if not buildings:
@@ -129,7 +140,11 @@ def list_buildings(skip: int = 0, limit: int = 100, db: Session = Depends(get_db
 
 
 @router.get("/{building_id}", response_model=dict)
-def get_building(building_id: UUID, db: Session = Depends(get_db)):
+def get_building(
+    building_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_any_auth),
+):
     """Get a specific building by ID with live tenant count"""
     building = db.query(Building).filter(Building.id == building_id).first()
     if not building:
@@ -144,7 +159,8 @@ def get_building(building_id: UUID, db: Session = Depends(get_db)):
 def update_building(
     building_id: UUID,
     building_update: BuildingUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
 ):
     """Update a building"""
     db_building = db.query(Building).filter(Building.id == building_id).first()
@@ -165,7 +181,11 @@ def update_building(
 
 
 @router.delete("/{building_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_building(building_id: UUID, db: Session = Depends(get_db)):
+def delete_building(
+    building_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_manager),
+):
     """Delete a building"""
     db_building = db.query(Building).filter(Building.id == building_id).first()
     if not db_building:

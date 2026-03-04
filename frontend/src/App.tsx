@@ -5,6 +5,9 @@ import { useEffect, Component } from 'react';
 import type { ReactNode } from 'react';
 import './i18n';
 
+import { AuthProvider } from './context/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
+
 import Buildings from './pages/Buildings';
 import Dashboard from './pages/Dashboard';
 import UploadStatement from './pages/UploadStatement';
@@ -14,6 +17,10 @@ import Settings from './pages/Settings';
 import WhatsAppTemplates from './pages/WhatsAppTemplates';
 import Tenants from './pages/Tenants';
 import AllTenants from './pages/AllTenants';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import InviteAccept from './pages/InviteAccept';
+import Users from './pages/Users';
 import Layout from './components/layout/Layout';
 
 const queryClient = new QueryClient({
@@ -102,21 +109,55 @@ function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Navigate to="/buildings" replace />} />
-            <Route path="/buildings" element={<Buildings />} />
-            <Route path="/building/:buildingId" element={<Dashboard />} />
-            <Route path="/building/:buildingId/upload" element={<UploadStatement />} />
-            <Route path="/statements" element={<StatementsUpload />} />
-            <Route path="/messages" element={<Messages />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/whatsapp-templates" element={<WhatsAppTemplates />} />
-            <Route path="/building/:buildingId/tenants" element={<Tenants />} />
-            <Route path="/tenants" element={<AllTenants />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
+        <AuthProvider>
+          <BrowserRouter>
+            <Routes>
+              {/* ─── Public routes ─── */}
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/invite/:token" element={<InviteAccept />} />
+
+              {/* ─── Protected routes ─── */}
+              <Route path="/" element={<Navigate to="/buildings" replace />} />
+
+              <Route path="/buildings" element={
+                <ProtectedRoute><Buildings /></ProtectedRoute>
+              } />
+              <Route path="/building/:buildingId" element={
+                <ProtectedRoute><Dashboard /></ProtectedRoute>
+              } />
+              <Route path="/building/:buildingId/upload" element={
+                <ProtectedRoute roles={['manager', 'worker']}><UploadStatement /></ProtectedRoute>
+              } />
+              <Route path="/statements" element={
+                <ProtectedRoute roles={['manager', 'worker']}><StatementsUpload /></ProtectedRoute>
+              } />
+              <Route path="/messages" element={
+                <ProtectedRoute roles={['manager', 'worker']}><Messages /></ProtectedRoute>
+              } />
+              <Route path="/settings" element={
+                <ProtectedRoute roles={['manager']}><Settings /></ProtectedRoute>
+              } />
+              <Route path="/whatsapp-templates" element={
+                <ProtectedRoute roles={['manager', 'worker']}><WhatsAppTemplates /></ProtectedRoute>
+              } />
+              <Route path="/building/:buildingId/tenants" element={
+                <ProtectedRoute><Tenants /></ProtectedRoute>
+              } />
+              <Route path="/tenants" element={
+                <ProtectedRoute><AllTenants /></ProtectedRoute>
+              } />
+              {/* Manager-only: user management */}
+              <Route path="/users" element={
+                <ProtectedRoute roles={['manager']}>
+                  <Layout><Users /></Layout>
+                </ProtectedRoute>
+              } />
+
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </AuthProvider>
       </QueryClientProvider>
     </ErrorBoundary>
   );

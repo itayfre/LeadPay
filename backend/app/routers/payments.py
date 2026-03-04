@@ -12,6 +12,8 @@ from ..models import (
     Building, Apartment, Tenant, Transaction,
     BankStatement, TransactionType, MatchMethod
 )
+from ..models.user import User
+from ..dependencies.auth import require_worker_plus, require_viewer_plus
 
 router = APIRouter(
     prefix="/api/v1/payments",
@@ -24,7 +26,8 @@ router = APIRouter(
 def get_bulk_payment_summary(
     month: Optional[int] = None,
     year: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
 ):
     """
     Return payment summary for ALL buildings for a given month/year.
@@ -156,7 +159,8 @@ class ManualPaymentRequest(BaseModel):
 @router.post("/manual")
 def create_manual_payment(
     payload: ManualPaymentRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
 ):
     """
     Record a manual payment for a tenant (cash, bank transfer outside normal matching).
@@ -223,7 +227,8 @@ def create_manual_payment(
 @router.get("/tenant/{tenant_id}/history")
 def get_tenant_payment_history(
     tenant_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
 ):
     """
     Return month-by-month payment history for a tenant from move_in_date to current month.
@@ -328,7 +333,8 @@ def get_tenant_payment_history(
 @router.get("/{building_id}/tenant-debts")
 def get_tenant_debts(
     building_id: UUID,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
 ):
     """
     Return cumulative all-time debt (from move_in_date to today) for every
@@ -396,7 +402,8 @@ def get_payment_status(
     building_id: UUID,
     month: Optional[int] = None,
     year: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
 ):
     """
     Get payment status for all tenants in a building for a specific period.
@@ -581,7 +588,8 @@ def get_unpaid_tenants(
     building_id: UUID,
     month: Optional[int] = None,
     year: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
 ):
     """Get list of tenants who haven't paid for a specific period"""
     # Get full payment status
@@ -606,7 +614,8 @@ def get_unpaid_tenants(
 def get_payment_history(
     building_id: UUID,
     months: int = 6,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
 ):
     """Get payment history for the last N months"""
     # Verify building exists

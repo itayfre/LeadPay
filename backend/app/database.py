@@ -8,7 +8,19 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_engine(DATABASE_URL)
+_connect_args = {}
+# Add SSL for production/remote databases (Supabase requires it)
+if DATABASE_URL and ("supabase" in DATABASE_URL or os.getenv("APP_ENV") == "production"):
+    _connect_args = {"sslmode": "require"}
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=30,
+    pool_recycle=1800,
+    connect_args=_connect_args,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

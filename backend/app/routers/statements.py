@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
 from sqlalchemy.orm import Session
 from typing import List
 from uuid import UUID
@@ -9,8 +9,21 @@ from ..models import (
     BankStatement, Transaction, Building, Tenant,
     Apartment, TransactionType, MatchMethod
 )
+from ..models.user import User
 from ..services.excel_parser import BankStatementParser
 from ..services.matching_engine import NameMatchingEngine
+from ..dependencies.auth import require_worker_plus, require_viewer_plus
+import logging
+import os
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+logger = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address)
+
+# File upload security constants
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
+ALLOWED_EXTENSIONS = {'.xlsx', '.xls'}
 
 router = APIRouter(
     prefix="/api/v1/statements",
@@ -19,11 +32,14 @@ router = APIRouter(
 
 
 @router.post("/{building_id}/upload", status_code=status.HTTP_201_CREATED)
+@limiter.limit("20/minute")
 async def upload_bank_statement(
+    request: Request,
     building_id: UUID,
     file: UploadFile = File(...),
     auto_match: bool = True,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
 ):
     """
     Upload and parse a bank statement Excel file for a building.
@@ -37,13 +53,30 @@ async def upload_bank_statement(
             detail=f"Building with id {building_id} not found"
         )
 
+    # Validate file extension
+    filename = file.filename or ''
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="סוג קובץ לא נתמך. יש להעלות קבצי Excel בלבד (.xlsx, .xls)",
+        )
+
     # Read file content
     try:
         contents = await file.read()
     except Exception as e:
+        logger.error(f"File read error for building {building_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to read file: {str(e)}"
+            detail="Failed to read file. Please check the format."
+        )
+
+    # Validate file size
+    if len(contents) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="הקובץ גדול מדי. הגודל המקסימלי הוא 10MB",
         )
 
     # Parse the Excel file (return_all=True so fees/transfers are saved for review UI)
@@ -51,9 +84,10 @@ async def upload_bank_statement(
     try:
         transactions_data, metadata = parser.parse_excel(contents, file.filename, return_all=True)
     except Exception as e:
+        logger.error(f"Excel parse error for building {building_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to parse Excel file: {str(e)}"
+            detail="Failed to parse Excel file. Please check the format."
         )
 
     # Create bank statement record
@@ -204,7 +238,8 @@ async def upload_bank_statement(
 @router.get("/{statement_id}/review")
 def get_statement_review(
     statement_id: UUID,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
 ):
     """
     Get a grouped review of all transactions in a statement.
@@ -327,7 +362,8 @@ def get_statement_transactions(
     statement_id: UUID,
     include_matched: bool = True,
     include_unmatched: bool = True,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
 ):
     """Get all transactions for a specific bank statement"""
     statement = db.query(BankStatement).filter(BankStatement.id == statement_id).first()
@@ -374,7 +410,8 @@ def manually_match_transaction(
     transaction_id: UUID,
     tenant_id: UUID,
     remember: bool = True,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
 ):
     """Manually match a transaction to a tenant"""
     transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
@@ -440,7 +477,8 @@ def manually_match_transaction(
 @router.get("/{building_id}/statements")
 def list_building_statements(
     building_id: UUID,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
 ):
     """List all bank statements for a building"""
     building = db.query(Building).filter(Building.id == building_id).first()

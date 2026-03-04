@@ -17,6 +17,7 @@ from app.models import (
     Building, Apartment, Tenant, BankStatement,
     Transaction, NameMapping, Message
 )
+from app.models.user import User  # noqa: F401 — ensures User table is in metadata
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

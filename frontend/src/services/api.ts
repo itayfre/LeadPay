@@ -2,15 +2,30 @@ import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, W
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+/** Injects the Bearer token from localStorage into every API request. */
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem('access_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 // Generic fetch wrapper
 async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
     headers: {
       'Content-Type': 'application/json',
+      ...getAuthHeaders(),
       ...options?.headers,
     },
     ...options,
   });
+
+  if (response.status === 401) {
+    // Token expired or invalid — redirect to login
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    window.location.href = '/login';
+    throw new Error('Session expired. Please log in again.');
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
@@ -86,6 +101,7 @@ export const statementsAPI = {
 
     const response = await fetch(`${API_BASE_URL}/api/v1/statements/${buildingId}/upload`, {
       method: 'POST',
+      headers: getAuthHeaders(),
       body: formData,
     });
 
@@ -109,7 +125,7 @@ export const statementsAPI = {
   manualMatch: async (transactionId: string, tenantId: string) => {
     const response = await fetch(
       `${API_BASE_URL}/api/v1/statements/transactions/${transactionId}/match/${tenantId}`,
-      { method: 'POST' }
+      { method: 'POST', headers: getAuthHeaders() }
     );
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Match failed' }));
@@ -144,6 +160,7 @@ export const tenantsAPI = {
 
     const response = await fetch(`${API_BASE_URL}/api/v1/tenants/${buildingId}/import`, {
       method: 'POST',
+      headers: getAuthHeaders(),
       body: formData,
     });
 

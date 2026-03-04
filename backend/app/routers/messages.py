@@ -1,16 +1,24 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
+import logging
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from ..database import get_db
 from ..models import (
     Message, MessageType, DeliveryStatus,
     Building, Tenant, Apartment
 )
+from ..models.user import User
 from ..services.whatsapp_service import WhatsAppService
 from ..routers.payments import get_payment_status
+from ..dependencies.auth import require_worker_plus, require_viewer_plus
+
+logger = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(
     prefix="/api/v1/messages",
@@ -19,12 +27,15 @@ router = APIRouter(
 
 
 @router.post("/{building_id}/generate-reminders")
+@limiter.limit("10/minute")
 def generate_payment_reminders(
+    request: Request,
     building_id: UUID,
     month: Optional[int] = None,
     year: Optional[int] = None,
     only_unpaid: bool = True,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
 ):
     """
     Generate WhatsApp payment reminder messages for tenants.
@@ -51,6 +62,7 @@ def generate_payment_reminders(
 
     # Generate messages
     messages = []
+    skipped_count = 0
     for tenant_data in tenants_data:
         tenant_id = UUID(tenant_data['tenant_id'])
         tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
@@ -115,8 +127,19 @@ def generate_payment_reminders(
             message=message_text
         )
 
-        # Save message to database (as pending)
+        # Check for existing pending/sent message this period (dedup)
         period_parts = payment_status['period'].split('/')
+        existing_msg = db.query(Message).filter(
+            Message.tenant_id == tenant_id,
+            Message.period_month == (month or int(period_parts[0])),
+            Message.period_year == (year or int(period_parts[1])),
+            Message.delivery_status.in_([DeliveryStatus.PENDING, DeliveryStatus.SENT])
+        ).first()
+        if existing_msg:
+            skipped_count += 1
+            continue
+
+        # Save message to database (as pending)
         db_message = Message(
             tenant_id=tenant_id,
             building_id=building_id,
@@ -157,6 +180,7 @@ def generate_payment_reminders(
         'building_name': building.name,
         'period': payment_status['period'],
         'total_messages': len(result_messages),
+        'skipped_duplicates': skipped_count,
         'messages': result_messages,
         'instructions': 'Click on the whatsapp_link to open WhatsApp Web with pre-filled message. You just need to click Send!'
     }
@@ -165,7 +189,8 @@ def generate_payment_reminders(
 @router.post("/message/{message_id}/mark-sent")
 def mark_message_sent(
     message_id: UUID,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
 ):
     """Mark a message as sent (after user clicks Send in WhatsApp)"""
     message = db.query(Message).filter(Message.id == message_id).first()
@@ -191,7 +216,8 @@ def mark_message_sent(
 def get_message_history(
     building_id: UUID,
     limit: int = 50,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
 ):
     """Get message history for a building"""
     building = db.query(Building).filter(Building.id == building_id).first()
@@ -226,7 +252,8 @@ def get_message_history(
 @router.get("/tenant/{tenant_id}/history")
 def get_tenant_message_history(
     tenant_id: UUID,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
 ):
     """Get message history for a specific tenant"""
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
@@ -265,7 +292,8 @@ def generate_test_message(
     apartment_number: int = 1,
     amount: float = 190.0,
     period: str = "01/2026",
-    language: str = "he"
+    language: str = "he",
+    _: User = Depends(require_viewer_plus),
 ):
     """Generate a test WhatsApp message to preview formatting"""
     whatsapp = WhatsAppService()

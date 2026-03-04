@@ -1,14 +1,32 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 import pandas as pd
 import io
+import logging
+from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from ..database import get_db
 from ..models import Tenant, Apartment, Building, OwnershipType
+from ..models.user import User
 from ..schemas import TenantCreate, TenantUpdate, TenantResponse
+from ..dependencies.auth import require_manager, require_worker_plus, require_viewer_plus
+
+logger = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address)
+
+
+class ResolveApartmentRequest(BaseModel):
+    apt_number: int
+    floor: int = 0
+
+
+class PatchApartmentRequest(BaseModel):
+    expected_payment: Optional[float] = None
 
 router = APIRouter(
     prefix="/api/v1/tenants",
@@ -44,7 +62,11 @@ def normalize_phone(phone: str) -> str:
 
 
 @router.post("/", response_model=TenantResponse, status_code=status.HTTP_201_CREATED)
-def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
+def create_tenant(
+    tenant: TenantCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
+):
     """Create a new tenant"""
     apartment = db.query(Apartment).filter(Apartment.id == tenant.apartment_id).first()
     if not apartment:
@@ -66,7 +88,8 @@ def list_tenants(
     building_id: UUID = None,
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
 ):
     """Get all tenants (optionally filtered by building), with apartment and building info."""
     query = (
@@ -109,7 +132,11 @@ def list_tenants(
 
 
 @router.get("/{tenant_id}", response_model=TenantResponse)
-def get_tenant(tenant_id: UUID, db: Session = Depends(get_db)):
+def get_tenant(
+    tenant_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
+):
     """Get a specific tenant by ID"""
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
@@ -124,7 +151,8 @@ def get_tenant(tenant_id: UUID, db: Session = Depends(get_db)):
 def update_tenant(
     tenant_id: UUID,
     tenant_update: TenantUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
 ):
     """Update a tenant"""
     db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
@@ -150,7 +178,11 @@ def update_tenant(
 
 
 @router.delete("/{tenant_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_tenant(tenant_id: UUID, db: Session = Depends(get_db)):
+def delete_tenant(
+    tenant_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_manager),
+):
     """Delete a tenant, cleaning up soft references first."""
     db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not db_tenant:
@@ -188,18 +220,13 @@ def delete_tenant(tenant_id: UUID, db: Session = Depends(get_db)):
 @router.post("/{building_id}/apartments/resolve")
 def resolve_apartment(
     building_id: UUID,
-    data: dict,
-    db: Session = Depends(get_db)
+    data: ResolveApartmentRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
 ):
     """Find or create an apartment by building + number. Returns apartment_id."""
-    apt_number = data.get("apt_number")
-    floor = data.get("floor", 0)
-
-    if apt_number is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="apt_number is required"
-        )
+    apt_number = data.apt_number
+    floor = data.floor
 
     building = db.query(Building).filter(Building.id == building_id).first()
     if not building:
@@ -231,10 +258,13 @@ def resolve_apartment(
 
 
 @router.post("/{building_id}/import", status_code=status.HTTP_201_CREATED)
+@limiter.limit("20/minute")
 async def import_tenants_from_excel(
+    request: Request,
     building_id: UUID,
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
 ):
     """
     Import tenants from an Excel file for a specific building.
@@ -364,7 +394,8 @@ async def import_tenants_from_excel(
             imported_count += 1
 
         except Exception as e:
-            errors.append(f"Row {index + 1}: {str(e)}")
+            logger.error(f"Row {index+1} error: {e}")
+            errors.append(f"שורה {index + 1}: שגיאה בעיבוד השורה")
             continue
 
     # Commit all changes
@@ -387,17 +418,19 @@ async def import_tenants_from_excel(
 @router.patch("/apartments/{apartment_id}", status_code=status.HTTP_200_OK)
 def patch_apartment(
     apartment_id: UUID,
-    data: dict,
-    db: Session = Depends(get_db)
+    data: PatchApartmentRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
 ):
     """Patch an apartment's expected_payment override. Pass null to clear override."""
     apartment = db.query(Apartment).filter(Apartment.id == apartment_id).first()
     if not apartment:
         raise HTTPException(status_code=404, detail=f"Apartment {apartment_id} not found")
 
-    if "expected_payment" in data:
-        val = data["expected_payment"]
-        apartment.expected_payment = float(val) if val is not None else None
+    if data.expected_payment is not None:
+        apartment.expected_payment = float(data.expected_payment)
+    else:
+        apartment.expected_payment = None
 
     db.commit()
     db.refresh(apartment)
