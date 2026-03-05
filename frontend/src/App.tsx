@@ -12,7 +12,6 @@ import Buildings from './pages/Buildings';
 import Dashboard from './pages/Dashboard';
 import UploadStatement from './pages/UploadStatement';
 import StatementsUpload from './pages/StatementsUpload';
-import Messages from './pages/Messages';
 import Settings from './pages/Settings';
 import WhatsAppTemplates from './pages/WhatsAppTemplates';
 import Tenants from './pages/Tenants';
@@ -132,11 +131,8 @@ function App() {
               <Route path="/statements" element={
                 <ProtectedRoute roles={['manager', 'worker']}><StatementsUpload /></ProtectedRoute>
               } />
-              <Route path="/messages" element={
-                <ProtectedRoute roles={['manager', 'worker']}><Messages /></ProtectedRoute>
-              } />
               <Route path="/settings" element={
-                <ProtectedRoute roles={['manager']}><Settings /></ProtectedRoute>
+                <ProtectedRoute roles={['manager', 'worker']}><Settings /></ProtectedRoute>
               } />
               <Route path="/whatsapp-templates" element={
                 <ProtectedRoute roles={['manager', 'worker']}><WhatsAppTemplates /></ProtectedRoute>

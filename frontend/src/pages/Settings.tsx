@@ -12,27 +12,6 @@ export default function Settings() {
       color: 'from-purple-500 to-pink-600',
       path: '/whatsapp-templates',
     },
-    {
-      icon: '🌐',
-      title: 'שפה ואזור',
-      description: 'בחר שפה ואזור זמן',
-      color: 'from-blue-500 to-cyan-600',
-      path: null,
-    },
-    {
-      icon: '🔔',
-      title: 'התראות',
-      description: 'נהל התראות ותזכורות',
-      color: 'from-orange-500 to-red-600',
-      path: null,
-    },
-    {
-      icon: '👤',
-      title: 'פרופיל משתמש',
-      description: 'ערוך פרטים אישיים',
-      color: 'from-green-500 to-teal-600',
-      path: null,
-    },
   ];
 
   return (
