@@ -95,7 +95,10 @@ def login(
 
 @router.post("/refresh")
 def refresh_token(body: RefreshRequest, db: Session = Depends(get_db)):
-    """Exchange a valid refresh token for a new access token."""
+    """
+    Exchange a valid refresh token for a new access token + a fresh refresh token.
+    Sliding window: every use resets the 30-day inactivity clock.
+    """
     payload = decode_token(body.refresh_token)
     if payload.get("type") != "refresh":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
@@ -109,7 +112,14 @@ def refresh_token(body: RefreshRequest, db: Session = Depends(get_db)):
         role=user.role.value,
         building_id=str(user.building_id) if user.building_id else None,
     )
-    return {"access_token": new_access_token, "token_type": "bearer"}
+    # Issue a fresh refresh token (sliding window — resets the 30-day clock on every use)
+    new_refresh_token = create_refresh_token(user_id=str(user.id))
+
+    return {
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "token_type": "bearer",
+    }
 
 
 @router.get("/me")

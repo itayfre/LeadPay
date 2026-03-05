@@ -9,7 +9,7 @@ from fastapi import HTTPException, status
 SECRET_KEY = os.getenv("APP_SECRET_KEY", "CHANGE_ME_in_production_use_openssl_rand_hex_32")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
-REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -38,7 +38,7 @@ def create_access_token(user_id: str, role: str, building_id: Optional[str] = No
 
 
 def create_refresh_token(user_id: str) -> str:
-    """Create a long-lived JWT refresh token (default: 7 days)."""
+    """Create a long-lived JWT refresh token (default: 30 days)."""
     expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     payload = {
         "sub": user_id,
