@@ -1,18 +1,24 @@
 import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, BankStatement, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+export const TOKEN_KEYS = {
+  ACCESS: 'access_token',
+  REFRESH: 'refresh_token',
+} as const;
 
 /** Injects the Bearer token from localStorage into every API request. */
 function getAuthHeaders(): Record<string, string> {
-  const token = localStorage.getItem('access_token');
+  const token = localStorage.getItem(TOKEN_KEYS.ACCESS);
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-// Generic fetch wrapper
+// Generic fetch wrapper. Automatically omits Content-Type for FormData (lets browser set boundary).
 async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const isFormData = options?.body instanceof FormData;
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...getAuthHeaders(),
       ...options?.headers,
     },
@@ -21,8 +27,8 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> 
 
   if (response.status === 401) {
     // Token expired or invalid — redirect to login
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+    localStorage.removeItem(TOKEN_KEYS.ACCESS);
+    localStorage.removeItem(TOKEN_KEYS.REFRESH);
     window.location.href = '/login';
     throw new Error('Session expired. Please log in again.');
   }
@@ -95,22 +101,10 @@ export const paymentsAPI = {
 
 // Statements API
 export const statementsAPI = {
-  upload: async (buildingId: string, file: File) => {
+  upload: (buildingId: string, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-
-    const response = await fetch(`${API_BASE_URL}/api/v1/statements/${buildingId}/upload`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
-      throw new Error(error.detail);
-    }
-
-    return response.json();
+    return fetchAPI<any>(`/api/v1/statements/${buildingId}/upload`, { method: 'POST', body: formData });
   },
 
   list: (buildingId: string) =>
@@ -122,17 +116,11 @@ export const statementsAPI = {
   getReview: (statementId: string) =>
     fetchAPI<StatementReview>(`/api/v1/statements/${statementId}/review`),
 
-  manualMatch: async (transactionId: string, tenantId: string) => {
-    const response = await fetch(
-      `${API_BASE_URL}/api/v1/statements/transactions/${transactionId}/match/${tenantId}`,
-      { method: 'POST', headers: getAuthHeaders() }
-    );
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Match failed' }));
-      throw new Error(error.detail || 'Match failed');
-    }
-    return response.json();
-  },
+  manualMatch: (transactionId: string, tenantId: string) =>
+    fetchAPI<any>(
+      `/api/v1/statements/transactions/${transactionId}/match/${tenantId}`,
+      { method: 'POST' }
+    ),
 };
 
 // Messages API
@@ -147,29 +135,14 @@ export const messagesAPI = {
 
   markSent: (messageId: string) =>
     fetchAPI<void>(`/api/v1/messages/message/${messageId}/mark-sent`, { method: 'POST' }),
-
-  getHistory: (buildingId: string) =>
-    fetchAPI<{ messages: any[] }>(`/api/v1/messages/${buildingId}/history`),
 };
 
 // Tenants API
 export const tenantsAPI = {
-  import: async (buildingId: string, file: File) => {
+  import: (buildingId: string, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-
-    const response = await fetch(`${API_BASE_URL}/api/v1/tenants/${buildingId}/import`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Import failed' }));
-      throw new Error(error.detail);
-    }
-
-    return response.json();
+    return fetchAPI<any>(`/api/v1/tenants/${buildingId}/import`, { method: 'POST', body: formData });
   },
 
   list: (buildingId?: string) => {

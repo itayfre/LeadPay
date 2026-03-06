@@ -16,6 +16,7 @@ from ..services.auth_service import (
     decode_token, generate_invite_token,
 )
 from ..dependencies.auth import get_current_user
+from ..utils.user_utils import user_to_dict
 
 logger = logging.getLogger(__name__)
 
@@ -36,17 +37,6 @@ class InviteAcceptRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
-
-
-def _user_dict(user: User) -> dict:
-    return {
-        "id": str(user.id),
-        "email": user.email,
-        "full_name": user.full_name,
-        "role": user.role.value,
-        "status": user.status.value,
-        "building_id": str(user.building_id) if user.building_id else None,
-    }
 
 
 @router.post("/login")
@@ -89,7 +79,7 @@ def login(
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
-        "user": _user_dict(user),
+        "user": user_to_dict(user),
     }
 
 
@@ -125,7 +115,7 @@ def refresh_token(body: RefreshRequest, db: Session = Depends(get_db)):
 @router.get("/me")
 def get_me(current_user: User = Depends(get_current_user)):
     """Get the current authenticated user's profile."""
-    return _user_dict(current_user)
+    return user_to_dict(current_user)
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
@@ -212,5 +202,5 @@ def accept_invite(token: str, body: InviteAcceptRequest, db: Session = Depends(g
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
-        "user": _user_dict(user),
+        "user": user_to_dict(user),
     }

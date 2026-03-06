@@ -12,6 +12,7 @@ from ..models.user import User, UserRole, UserStatus
 from ..models.building import Building
 from ..services.auth_service import hash_password, generate_invite_token
 from ..dependencies.auth import require_manager, require_worker_plus, get_current_user
+from ..utils.user_utils import user_to_dict
 
 logger = logging.getLogger(__name__)
 
@@ -21,27 +22,15 @@ router = APIRouter(prefix="/api/v1/users", tags=["users"])
 class InviteUserRequest(BaseModel):
     email: EmailStr
     full_name: str
-    role: str = "viewer"
+    role: UserRole = UserRole.VIEWER
     building_id: Optional[str] = None
 
 
 class UpdateUserRequest(BaseModel):
-    role: Optional[str] = None
-    status: Optional[str] = None
+    role: Optional[UserRole] = None
+    status: Optional[UserStatus] = None
     building_id: Optional[str] = None
     full_name: Optional[str] = None
-
-
-def _user_dict(user: User) -> dict:
-    return {
-        "id": str(user.id),
-        "email": user.email,
-        "full_name": user.full_name,
-        "role": user.role.value,
-        "status": user.status.value,
-        "building_id": str(user.building_id) if user.building_id else None,
-        "created_at": user.created_at.isoformat() if user.created_at else None,
-    }
 
 
 @router.get("/", response_model=List[dict])
@@ -51,7 +40,7 @@ def list_users(
 ):
     """List all users (manager only)."""
     users = db.query(User).order_by(User.created_at.desc()).all()
-    return [_user_dict(u) for u in users]
+    return [user_to_dict(u) for u in users]
 
 
 @router.get("/pending", response_model=List[dict])
@@ -61,7 +50,7 @@ def list_pending(
 ):
     """List pending tenant registrations (manager/worker)."""
     users = db.query(User).filter(User.status == UserStatus.PENDING).all()
-    return [_user_dict(u) for u in users]
+    return [user_to_dict(u) for u in users]
 
 
 @router.post("/invite", status_code=status.HTTP_201_CREATED)
@@ -74,14 +63,6 @@ def invite_user(
     existing = db.query(User).filter(User.email == body.email.lower().strip()).first()
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
-
-    try:
-        role = UserRole(body.role)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid role: {body.role}. Valid values: manager, worker, viewer, tenant",
-        )
 
     building_uuid = None
     if body.building_id:
@@ -96,7 +77,7 @@ def invite_user(
     user = User(
         email=body.email.lower().strip(),
         full_name=body.full_name,
-        role=role,
+        role=body.role,
         status=UserStatus.INVITED,
         building_id=building_uuid,
         invite_token=token,
@@ -110,7 +91,7 @@ def invite_user(
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
     invite_url = f"{frontend_url}/invite/{token}"
     return {
-        "user": _user_dict(user),
+        "user": user_to_dict(user),
         "invite_url": invite_url,
         "expires_at": expires.isoformat(),
         "message": f"Send this link to {user.email}: {invite_url}",
@@ -130,16 +111,10 @@ def update_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     if body.role is not None:
-        try:
-            user.role = UserRole(body.role)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid role: {body.role}")
+        user.role = body.role
 
     if body.status is not None:
-        try:
-            user.status = UserStatus(body.status)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {body.status}")
+        user.status = body.status
 
     if body.building_id is not None:
         user.building_id = UUID(body.building_id) if body.building_id else None
@@ -149,7 +124,7 @@ def update_user(
 
     db.commit()
     db.refresh(user)
-    return _user_dict(user)
+    return user_to_dict(user)
 
 
 @router.post("/{user_id}/approve", response_model=dict)
@@ -168,7 +143,7 @@ def approve_user(
     user.status = UserStatus.ACTIVE
     db.commit()
     db.refresh(user)
-    return {"message": "User approved", "user": _user_dict(user)}
+    return {"message": "User approved", "user": user_to_dict(user)}
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

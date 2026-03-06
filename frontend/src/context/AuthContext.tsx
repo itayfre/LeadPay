@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { API_BASE_URL, TOKEN_KEYS } from '../services/api';
 
 export interface AuthUser {
   id: string;
@@ -27,8 +26,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearAuth = useCallback(() => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+    localStorage.removeItem(TOKEN_KEYS.ACCESS);
+    localStorage.removeItem(TOKEN_KEYS.REFRESH);
     setUser(null);
     if (refreshTimerRef.current) {
       clearTimeout(refreshTimerRef.current);
@@ -40,7 +39,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     // Refresh 5 minutes before expiry (tokens expire in 30 min → refresh at 25 min)
     refreshTimerRef.current = setTimeout(async () => {
-      const refreshToken = localStorage.getItem('refresh_token');
+      const refreshToken = localStorage.getItem(TOKEN_KEYS.REFRESH);
       if (!refreshToken) {
         clearAuth();
         return;
@@ -53,10 +52,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
         if (res.ok) {
           const data = await res.json();
-          localStorage.setItem('access_token', data.access_token);
+          localStorage.setItem(TOKEN_KEYS.ACCESS, data.access_token);
           // Store the new refresh token (sliding window resets the 30-day clock)
           if (data.refresh_token) {
-            localStorage.setItem('refresh_token', data.refresh_token);
+            localStorage.setItem(TOKEN_KEYS.REFRESH, data.refresh_token);
           }
           scheduleRefresh();
         } else {
@@ -75,7 +74,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // using the stored refresh token before giving up and redirecting to /login.
   useEffect(() => {
     const initAuth = async () => {
-      const token = localStorage.getItem('access_token');
+      const abort = () => { clearAuth(); setIsLoading(false); };
+
+      const token = localStorage.getItem(TOKEN_KEYS.ACCESS);
       if (!token) {
         setIsLoading(false);
         return;
@@ -88,7 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // If access token expired, try a silent refresh before giving up
       if (meRes.status === 401) {
-        const refreshToken = localStorage.getItem('refresh_token');
+        const refreshToken = localStorage.getItem(TOKEN_KEYS.REFRESH);
         if (refreshToken) {
           try {
             const refreshRes = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
@@ -98,30 +99,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
             if (refreshRes.ok) {
               const refreshData = await refreshRes.json();
-              localStorage.setItem('access_token', refreshData.access_token);
+              localStorage.setItem(TOKEN_KEYS.ACCESS, refreshData.access_token);
               if (refreshData.refresh_token) {
-                localStorage.setItem('refresh_token', refreshData.refresh_token);
+                localStorage.setItem(TOKEN_KEYS.REFRESH, refreshData.refresh_token);
               }
               // Retry /me with the fresh access token
               meRes = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
                 headers: { Authorization: `Bearer ${refreshData.access_token}` },
               });
             } else {
-              // Refresh token itself is expired or invalid — force re-login
-              clearAuth();
-              setIsLoading(false);
-              return;
+              return abort();
             }
           } catch {
-            clearAuth();
-            setIsLoading(false);
-            return;
+            return abort();
           }
         } else {
-          // No refresh token stored — force re-login
-          clearAuth();
-          setIsLoading(false);
-          return;
+          return abort();
         }
       }
 
@@ -156,8 +149,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const data = await res.json();
-    localStorage.setItem('access_token', data.access_token);
-    localStorage.setItem('refresh_token', data.refresh_token);
+    localStorage.setItem(TOKEN_KEYS.ACCESS, data.access_token);
+    localStorage.setItem(TOKEN_KEYS.REFRESH, data.refresh_token);
     setUser(data.user);
     scheduleRefresh();
   }, [scheduleRefresh]);
