@@ -22,10 +22,20 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+_frontend_url = os.getenv("FRONTEND_URL", "")
+if _frontend_url:
+    # Production: restrict to configured frontend origin(s)
+    _allow_origins = [o.strip() for o in _frontend_url.split(",")]
+    _allow_credentials = True
+else:
+    # No FRONTEND_URL set — allow all origins (covers local dev + initial Railway setup)
+    _allow_origins = ["*"]
+    _allow_credentials = False  # required when allow_origins=["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in os.getenv("FRONTEND_URL", "http://localhost:5173,http://localhost:5174,http://localhost:5175").split(",")],
-    allow_credentials=True,
+    allow_origins=_allow_origins,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
