@@ -20,6 +20,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import InviteAccept from './pages/InviteAccept';
 import Users from './pages/Users';
+import Setup from './pages/Setup';
 import Layout from './components/layout/Layout';
 
 const queryClient = new QueryClient({
@@ -114,6 +115,7 @@ function App() {
               {/* ─── Public routes ─── */}
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
+              <Route path="/setup" element={<Setup />} />
               <Route path="/invite/:token" element={<InviteAccept />} />
 
               {/* ─── Protected routes ─── */}

@@ -30,6 +30,12 @@ class RegisterRequest(BaseModel):
     building_id: Optional[str] = None
 
 
+class SetupRequest(BaseModel):
+    email: EmailStr
+    full_name: str
+    password: str
+
+
 class InviteAcceptRequest(BaseModel):
     full_name: str
     password: str
@@ -152,6 +158,55 @@ def register_tenant(body: RegisterRequest, db: Session = Depends(get_db)):
     return {
         "message": "הרשמתך התקבלה ותאושר בקרוב על ידי המנהל",
         "status": "pending",
+    }
+
+
+@router.get("/setup/status")
+def setup_status(db: Session = Depends(get_db)):
+    """Check if initial setup is needed (no users exist yet)."""
+    has_users = db.query(User).first() is not None
+    return {"setup_needed": not has_users}
+
+
+@router.post("/setup", status_code=status.HTTP_201_CREATED)
+def initial_setup(body: SetupRequest, db: Session = Depends(get_db)):
+    """
+    One-time setup: create the first manager account.
+    Returns 403 if any user already exists — use the regular login after that.
+    """
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    existing_users = db.query(User).first()
+    if existing_users:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Setup already completed. Use /login instead.",
+        )
+
+    user = User(
+        email=body.email.lower().strip(),
+        hashed_password=hash_password(body.password),
+        full_name=body.full_name,
+        role=UserRole.MANAGER,
+        status=UserStatus.ACTIVE,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    access_token = create_access_token(
+        user_id=str(user.id),
+        role=user.role.value,
+        building_id=None,
+    )
+    refresh_token = create_refresh_token(user_id=str(user.id))
+    return {
+        "message": "Manager account created successfully",
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user": user_to_dict(user),
     }
 
 
