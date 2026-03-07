@@ -11,18 +11,20 @@ export default function Setup() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
+  const [backendReady, setBackendReady] = useState<boolean | null>(null);
 
   // Redirect if already logged in
   useEffect(() => {
     if (user) { navigate('/buildings'); return; }
 
-    // Check if setup is still needed
+    // Check if setup is still needed + if backend is reachable
     fetch(`${API_BASE_URL}/api/v1/auth/setup/status`)
-      .then(r => r.json())
-      .then(data => {
+      .then(async r => {
+        setBackendReady(r.ok);
+        const data = await r.json();
         if (!data.setup_needed) navigate('/login');
       })
-      .catch(() => {}) // ignore network errors, let user try
+      .catch(() => setBackendReady(false)) // backend not reachable yet
       .finally(() => setChecking(false));
   }, [user, navigate]);
 
@@ -50,8 +52,26 @@ export default function Setup() {
           password: formData.password,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'שגיאה ביצירת החשבון');
+
+      // Safely parse response — body may be empty on server errors
+      const text = await res.text();
+      let data: any = {};
+      try { data = text ? JSON.parse(text) : {}; } catch { /* non-JSON body */ }
+
+      if (!res.ok) {
+        // Give a human-readable error in any case
+        const detail = data.detail || `שגיאת שרת (${res.status})`;
+        if (res.status === 404 || res.status === 0) {
+          throw new Error('השרת עדיין לא מוכן — המתן דקה ונסה שוב (Railway עדיין מתעדכן)');
+        }
+        if (res.status === 403) {
+          throw new Error('חשבון מנהל כבר קיים. עבור לדף הכניסה.');
+        }
+        if (res.status >= 500) {
+          throw new Error('שגיאת שרת — ייתכן שהמסד נתונים לא הוכן עדיין. בדוק את לוגים ב-Railway.');
+        }
+        throw new Error(detail);
+      }
 
       // Store tokens and redirect
       localStorage.setItem('access_token', data.access_token);
@@ -85,8 +105,24 @@ export default function Setup() {
         </div>
 
         {/* Banner */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-6 text-sm text-blue-800 text-right">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3 text-sm text-blue-800 text-right">
           <strong>ברוך הבא!</strong> צור את חשבון המנהל הראשון. פעולה זו ניתנת לביצוע פעם אחת בלבד.
+        </div>
+
+        {/* Backend status */}
+        <div className={`flex items-center gap-2 justify-end mb-4 text-sm px-1 ${
+          backendReady === null ? 'text-gray-400' :
+          backendReady ? 'text-green-600' : 'text-red-500'
+        }`}>
+          <span>
+            {backendReady === null && 'בודק חיבור לשרת...'}
+            {backendReady === true && '✅ השרת מוכן'}
+            {backendReady === false && '⚠️ השרת לא מגיב — Railway עדיין מתעדכן, המתן ורענן'}
+          </span>
+          <span className={`w-2.5 h-2.5 rounded-full ${
+            backendReady === null ? 'bg-gray-300 animate-pulse' :
+            backendReady ? 'bg-green-500' : 'bg-red-400 animate-pulse'
+          }`} />
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
