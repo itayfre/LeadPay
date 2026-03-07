@@ -17,6 +17,7 @@ app = FastAPI(
     description="Building Management Payment Tracker API - Phase 3: WhatsApp Integration",
     docs_url=None if APP_ENV == "production" else "/docs",
     redoc_url=None if APP_ENV == "production" else "/redoc",
+    redirect_slashes=False,
 )
 
 app.state.limiter = limiter

@@ -43,7 +43,7 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> 
 
 // Buildings API
 export const buildingsAPI = {
-  list: () => fetchAPI<Building[]>('/api/v1/buildings'),
+  list: () => fetchAPI<Building[]>('/api/v1/buildings/'),
 
   get: (id: string) => fetchAPI<Building>(`/api/v1/buildings/${id}`),
 
