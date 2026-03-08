@@ -38,6 +38,10 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> 
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
+  if (response.status === 204 || response.status === 205) {
+    return undefined as T;
+  }
+
   return response.json();
 }
 
