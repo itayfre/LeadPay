@@ -21,6 +21,7 @@ class MatchMethod(str, enum.Enum):
     MANUAL = "manual"
     AMOUNT = "amount"
     REVERSED_NAME = "reversed_name"
+    LEARNED = "learned"
 
 
 class Transaction(Base):
@@ -31,6 +32,7 @@ class Transaction(Base):
     activity_date = Column(DateTime, nullable=False)
     reference_number = Column(String, nullable=True)
     description = Column(String, nullable=False, comment="Original Hebrew text from bank")
+    payer_name = Column(String, nullable=True, comment="Extracted payer name from bank statement")
     credit_amount = Column(Numeric(10, 2), nullable=True)
     debit_amount = Column(Numeric(10, 2), nullable=True)
     balance = Column(Numeric(10, 2), nullable=True)

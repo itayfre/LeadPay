@@ -19,6 +19,7 @@ const METHOD_LABELS: Record<string, string> = {
   family_name: 'שם משפחה',
   manual: 'ידני',
   amount: 'סכום',
+  learned: '🔖 לומד',
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -53,6 +54,9 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
   const [pendingMatches, setPendingMatches] = useState<Record<string, string>>({});
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+
+  // Reject (unmatch) state
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -105,6 +109,21 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
       setConfirmError((err as Error).message);
     } finally {
       setConfirming(false);
+    }
+  };
+
+  const handleReject = async (txId: string) => {
+    setRejectingId(txId);
+    try {
+      await statementsAPI.unmatchTransaction(txId);
+      const updated = await statementsAPI.getReview(statementId);
+      setReview(updated);
+      queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId] });
+      if (updated.unmatched.length > 0) setActiveTab('unmatched');
+    } catch (err) {
+      setConfirmError((err as Error).message);
+    } finally {
+      setRejectingId(null);
     }
   };
 
@@ -231,6 +250,7 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
                           <th className="pb-2 font-medium">דייר מותאם</th>
                           <th className="pb-2 font-medium">ביטחון</th>
                           <th className="pb-2 font-medium">שיטה</th>
+                          <th className="pb-2 font-medium"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
@@ -249,6 +269,16 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
                             </td>
                             <td className="py-2.5 text-gray-400 text-xs">
                               {tx.match_method ? (METHOD_LABELS[tx.match_method] || tx.match_method) : '—'}
+                            </td>
+                            <td className="py-2.5 text-left">
+                              <button
+                                onClick={() => handleReject(tx.id)}
+                                disabled={rejectingId === tx.id}
+                                title="בטל התאמה"
+                                className="text-gray-300 hover:text-red-500 transition-colors text-base leading-none disabled:opacity-40"
+                              >
+                                {rejectingId === tx.id ? '…' : '✕'}
+                              </button>
                             </td>
                           </tr>
                         ))}

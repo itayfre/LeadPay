@@ -125,6 +125,12 @@ export const statementsAPI = {
       `/api/v1/statements/transactions/${transactionId}/match/${tenantId}`,
       { method: 'POST' }
     ),
+
+  unmatchTransaction: (transactionId: string) =>
+    fetchAPI<{ ok: boolean }>(
+      `/api/v1/statements/transactions/${transactionId}/unmatch`,
+      { method: 'POST' }
+    ),
 };
 
 // Messages API

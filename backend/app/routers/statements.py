@@ -7,7 +7,7 @@ import io
 from ..database import get_db
 from ..models import (
     BankStatement, Transaction, Building, Tenant,
-    Apartment, TransactionType, MatchMethod
+    Apartment, TransactionType, MatchMethod, NameMapping, MappingCreatedBy
 )
 from ..models.user import User
 from ..services.excel_parser import BankStatementParser
@@ -24,6 +24,13 @@ limiter = Limiter(key_func=get_remote_address)
 # File upload security constants
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {'.xlsx', '.xls'}
+
+
+def _is_check_or_cash(description: str) -> bool:
+    """Return True if transaction is a check or cash deposit.
+    These cause false positive name matches and should be skipped for NameMapping."""
+    desc = description or ''
+    return 'שיק' in desc or 'הפקדת מזומן' in desc or 'כספומט' in desc
 
 router = APIRouter(
     prefix="/api/v1/statements",
@@ -123,6 +130,12 @@ async def upload_bank_statement(
     # Initialize matching engine
     matcher = NameMatchingEngine(confidence_threshold=0.7)
 
+    # Load NameMappings for this building to enable learned matching
+    name_mappings = db.query(NameMapping).filter(
+        NameMapping.building_id == building_id
+    ).all()
+    learned_map = {nm.bank_name.strip().lower(): nm.tenant_id for nm in name_mappings}
+
     # Create transaction records
     matched_count = 0
     unmatched_count = 0
@@ -171,12 +184,15 @@ async def upload_bank_statement(
             # (it will appear in the building-wide unmatched review)
             continue
 
+        payer_name = trans_data.get('payer_name') or ''
+
         # Create transaction
         transaction = Transaction(
             statement_id=bank_statement.id,
             activity_date=trans_data['activity_date'],
             reference_number=trans_data['reference_number'],
             description=trans_data['description'],
+            payer_name=payer_name or None,
             credit_amount=trans_data['credit_amount'],
             debit_amount=trans_data['debit_amount'],
             balance=trans_data['balance'],
@@ -184,9 +200,26 @@ async def upload_bank_statement(
         )
 
         # Try to match if auto_match enabled and it's a payment
-        if auto_match and trans_data['transaction_type'] == 'payment' and trans_data.get('payer_name'):
+        if auto_match and trans_data['transaction_type'] == 'payment' and payer_name:
+            description = trans_data.get('description', '')
+
+            # 1. Learned match: check against previously confirmed NameMappings first
+            if not _is_check_or_cash(description):
+                learned_tid = learned_map.get(payer_name.strip().lower())
+                if learned_tid:
+                    transaction.matched_tenant_id = learned_tid
+                    transaction.match_confidence = 1.0
+                    transaction.match_method = MatchMethod.LEARNED
+                    transaction.is_confirmed = True
+                    matched_count += 1
+                    db.add(transaction)
+                    if trans_data['transaction_type'] == 'payment':
+                        payment_transactions.append(trans_data)
+                    continue  # skip fuzzy matching
+
+            # 2. Fuzzy matching
             tenant_id, confidence, method = matcher.match_transaction_to_tenants(
-                payer_name=trans_data['payer_name'],
+                payer_name=payer_name,
                 tenants=tenants_dict,
                 actual_amount=trans_data['credit_amount']
             )
@@ -201,8 +234,25 @@ async def upload_bank_statement(
                 except ValueError:
                     transaction.match_method = MatchMethod.FUZZY
                 # Auto-confirm high confidence matches
-                transaction.is_confirmed = confidence >= 0.9
+                is_auto_confirmed = confidence >= 0.9
+                transaction.is_confirmed = is_auto_confirmed
                 matched_count += 1
+
+                # Save to NameMapping when auto-confirming a high-confidence fuzzy match
+                if is_auto_confirmed and not _is_check_or_cash(description):
+                    existing_mapping = db.query(NameMapping).filter(
+                        NameMapping.building_id == building_id,
+                        NameMapping.bank_name == payer_name,
+                    ).first()
+                    if not existing_mapping:
+                        db.add(NameMapping(
+                            building_id=building_id,
+                            bank_name=payer_name,
+                            tenant_id=UUID(tenant_id),
+                            created_by=MappingCreatedBy.AUTO,
+                        ))
+                        # Also update learned_map so subsequent transactions in this upload benefit
+                        learned_map[payer_name.strip().lower()] = UUID(tenant_id)
             else:
                 unmatched_count += 1
 
@@ -294,7 +344,9 @@ def get_statement_review(
 
     # Process current statement for matched + irrelevant
     for t in statement_transactions:
-        payer_name = parser._extract_payer_name(t.description) or ''
+        # Prefer stored payer_name (correctly extracted during upload for all formats)
+        # Fall back to on-the-fly extraction from description for older transactions
+        payer_name = t.payer_name or parser._extract_payer_name(t.description) or ''
         base = {
             'id': str(t.id),
             'activity_date': t.activity_date.isoformat(),
@@ -322,7 +374,7 @@ def get_statement_review(
     for t in all_unmatched_transactions:
         if str(t.id) in seen_ids:
             continue
-        payer_name = parser._extract_payer_name(t.description) or ''
+        payer_name = t.payer_name or parser._extract_payer_name(t.description) or ''
         suggestions = []
         if payer_name and tenants_dict:
             raw_suggestions = matcher.suggest_matches(payer_name, tenants_dict, top_n=3)
@@ -436,32 +488,37 @@ def manually_match_transaction(
 
     # If remember is True, create a name mapping for future use
     if remember:
-        from ..models import NameMapping, MappingCreatedBy
-        # Extract payer name from description
+        # Use stored payer_name (correctly extracted at upload time for all formats)
+        # Fall back to on-the-fly extraction for older transactions without stored payer_name
         parser = BankStatementParser()
-        payer_name = parser._extract_payer_name(transaction.description)
+        payer_name = transaction.payer_name or parser._extract_payer_name(transaction.description)
 
-        if payer_name:
+        if payer_name and not _is_check_or_cash(transaction.description):
             # Get building_id from statement
             statement = db.query(BankStatement).filter(
                 BankStatement.id == transaction.statement_id
             ).first()
 
-            # Check if mapping already exists
-            existing_mapping = db.query(NameMapping).filter(
-                NameMapping.building_id == statement.building_id,
-                NameMapping.bank_name == payer_name,
-                NameMapping.tenant_id == tenant_id
-            ).first()
+            if statement:
+                # Check if mapping already exists for this payer (regardless of tenant)
+                # Update if tenant changed, otherwise skip
+                existing_mapping = db.query(NameMapping).filter(
+                    NameMapping.building_id == statement.building_id,
+                    NameMapping.bank_name == payer_name,
+                ).first()
 
-            if not existing_mapping:
-                name_mapping = NameMapping(
-                    building_id=statement.building_id,
-                    bank_name=payer_name,
-                    tenant_id=tenant_id,
-                    created_by=MappingCreatedBy.MANUAL
-                )
-                db.add(name_mapping)
+                if not existing_mapping:
+                    name_mapping = NameMapping(
+                        building_id=statement.building_id,
+                        bank_name=payer_name,
+                        tenant_id=tenant_id,
+                        created_by=MappingCreatedBy.MANUAL
+                    )
+                    db.add(name_mapping)
+                elif existing_mapping.tenant_id != tenant_id:
+                    # Update to new tenant if the mapping changed
+                    existing_mapping.tenant_id = tenant_id
+                    existing_mapping.created_by = MappingCreatedBy.MANUAL
 
     db.commit()
     db.refresh(transaction)
@@ -472,6 +529,29 @@ def manually_match_transaction(
         "tenant_id": str(tenant_id),
         "remember": remember
     }
+
+
+@router.post("/transactions/{transaction_id}/unmatch")
+def unmatch_transaction(
+    transaction_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
+):
+    """Remove a match from a transaction, sending it back to the unmatched pool."""
+    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
+    if not transaction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Transaction with id {transaction_id} not found"
+        )
+
+    transaction.matched_tenant_id = None
+    transaction.match_confidence = None
+    transaction.match_method = None
+    transaction.is_confirmed = False
+
+    db.commit()
+    return {"ok": True, "transaction_id": str(transaction_id)}
 
 
 @router.get("/{building_id}/statements")
