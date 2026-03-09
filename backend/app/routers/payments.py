@@ -82,31 +82,71 @@ def get_bulk_payment_summary(
         .all()
     )
 
-    # Aggregate per building
-    paid_by_building: dict = {}
+    # Get expected payment per tenant (for partial detection)
+    expected_rows = (
+        db.query(
+            Tenant.id.label("tenant_id"),
+            Apartment.building_id.label("building_id"),
+            Apartment.expected_payment.label("apt_expected"),
+            Building.expected_monthly_payment.label("building_default"),
+        )
+        .join(Apartment, Tenant.apartment_id == Apartment.id)
+        .join(Building, Apartment.building_id == Building.id)
+        .filter(
+            Apartment.building_id.in_(building_ids),
+            Tenant.is_active == True,
+        )
+        .all()
+    )
+    expected_by_tenant: dict = {}
+    for row in expected_rows:
+        tid = str(row.tenant_id)
+        apt_exp = float(row.apt_expected) if row.apt_expected is not None else None
+        bld_def = float(row.building_default) if row.building_default is not None else 0.0
+        expected_by_tenant[tid] = apt_exp if apt_exp is not None else bld_def
+
+    # Aggregate per building: amount paid per tenant
+    paid_amounts_by_building: dict = {}   # bid -> {tid: amount}
     collected_by_building: dict = {}
     for row in paid_rows:
         bid = str(row.building_id)
-        if bid not in paid_by_building:
-            paid_by_building[bid] = set()
+        tid = str(row.matched_tenant_id)
+        amount = float(row.total_paid or 0)
+        if bid not in paid_amounts_by_building:
+            paid_amounts_by_building[bid] = {}
             collected_by_building[bid] = 0.0
-        paid_by_building[bid].add(str(row.matched_tenant_id))
-        collected_by_building[bid] += float(row.total_paid or 0)
+        paid_amounts_by_building[bid][tid] = paid_amounts_by_building[bid].get(tid, 0.0) + amount
+        collected_by_building[bid] += amount
 
     # Build result
     result = []
     for building in buildings:
         bid = str(building.id)
         total = tenant_counts.get(bid, 0)
-        paid_set = paid_by_building.get(bid, set())
-        paid = len(paid_set)
-        unpaid = max(0, total - paid)
+        paid_amounts = paid_amounts_by_building.get(bid, {})
         collected = collected_by_building.get(bid, 0.0)
-        collection_rate = round(paid / total * 100, 1) if total > 0 else 0.0
+
+        fully_paid = 0
+        partial = 0
+        for tid, amount in paid_amounts.items():
+            expected = expected_by_tenant.get(tid, 0.0)
+            if expected > 0:
+                if amount >= expected:
+                    fully_paid += 1
+                else:
+                    partial += 1
+            else:
+                # No expected amount: any payment counts as full
+                if amount > 0:
+                    fully_paid += 1
+
+        unpaid = max(0, total - fully_paid - partial)
+        collection_rate = round(fully_paid / total * 100, 1) if total > 0 else 0.0
 
         result.append({
             "building_id": bid,
-            "paid": paid,
+            "paid": fully_paid,
+            "partial": partial,
             "unpaid": unpaid,
             "total_tenants": total,
             "collection_rate": collection_rate,
@@ -514,6 +554,7 @@ def get_payment_status(
     total_expected = 0
     total_collected = 0
     paid_count = 0
+    partial_count = 0
     unpaid_count = 0
 
     for tenant, apartment in tenants_query:
@@ -531,15 +572,25 @@ def get_payment_status(
 
         # Calculate status
         is_paid = paid >= expected if expected > 0 else paid > 0
+        is_partial = (not is_paid) and paid > 0
         difference = paid - expected
 
         if is_paid:
             paid_count += 1
+        elif is_partial:
+            partial_count += 1
         else:
             unpaid_count += 1
 
         total_expected += expected
         total_collected += paid
+
+        if is_paid:
+            status_str = "paid"
+        elif is_partial:
+            status_str = "partial"
+        else:
+            status_str = "unpaid"
 
         tenant_statuses.append({
             "tenant_id": tenant_id,
@@ -549,7 +600,7 @@ def get_payment_status(
             "expected_amount": expected,
             "paid_amount": paid,
             "difference": difference,
-            "status": "paid" if is_paid else "unpaid",
+            "status": status_str,
             "is_overpaid": difference > 1.0,
             "is_underpaid": difference < -1.0,
             "phone": tenant.phone,
@@ -573,6 +624,7 @@ def get_payment_status(
         "summary": {
             "total_tenants": len(tenant_statuses),
             "paid": paid_count,
+            "partial": partial_count,
             "unpaid": unpaid_count,
             "total_expected": total_expected,
             "total_collected": total_collected,

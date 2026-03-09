@@ -432,8 +432,11 @@ function BuildingCard({ building, summary, onClick, onEdit, onDelete }: Building
         <div className="px-6 pb-4">
           {summary && summary.total_tenants > 0 ? (
             <div className="space-y-2">
-              <div className="flex justify-between text-sm">
+              <div className="flex justify-between text-sm flex-wrap gap-1">
                 <span className="text-green-700 font-medium">✅ {summary.paid} שילמו</span>
+                {(summary.partial ?? 0) > 0 && (
+                  <span className="text-orange-600 font-medium">⚠️ {summary.partial} חלקי</span>
+                )}
                 <span className="text-red-600 font-medium">❌ {summary.unpaid} לא שילמו</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">

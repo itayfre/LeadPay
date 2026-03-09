@@ -30,7 +30,7 @@ class Tenant(Base):
     phone = Column(String, nullable=True, comment="Normalized to +972 format")
     email = Column(String, nullable=True)
     language = Column(SQLEnum(LanguagePreference, values_callable=lambda x: [e.value for e in x]), default=LanguagePreference.HEBREW)
-    ownership_type = Column(SQLEnum(OwnershipType, values_callable=lambda x: [e.value for e in x]), nullable=False)
+    ownership_type = Column(SQLEnum(OwnershipType, values_callable=lambda x: [e.value for e in x]), nullable=True)
     is_committee_member = Column(Boolean, default=False)
     has_standing_order = Column(Boolean, default=False)
     bank_name = Column(String, nullable=True, comment="Bank name for payment matching")

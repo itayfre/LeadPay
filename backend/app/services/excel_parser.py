@@ -1,12 +1,29 @@
 """
 Bank Statement Excel Parser
 Parses Hebrew bank statement Excel files and extracts transactions.
+
+Supports multiple bank export formats:
+  - Standard / FibiBank: headers at row 0 or auto-detected; column names like
+      'תאריך פעילות', 'תאור פעולה', 'זכות', 'חובה', 'יתרה'
+  - FibiSave XLS: headers mid-file (e.g. row 4); columns 'תאור', 'תאריך', etc.
+  - Leumi XLSX: 10 metadata rows before data; columns 'תיאור', 'בזכות', 'בחובה',
+      'היתרה בש"ח', 'תאור מורחב' (has full payer name in extended description)
+  - Leumi XLS: same structure as Leumi XLSX but exported as HTML disguised as XLS
 """
 
+import io
+import re
 import pandas as pd
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
-import re
+
+
+# All known header-row keywords across all formats
+HEADER_KEYWORDS: set = {
+    'תאריך פעילות', 'תאריך תמצית', 'תאור פעולה', 'זכות', 'חובה', 'יתרה',
+    'תאריך', 'תיאור', 'תאור', 'בזכות', 'בחובה', 'היתרה בש"ח', 'תאור מורחב',
+    'אסמכתא', 'תאריך ערך', 'סוג פעולה',
+}
 
 
 class BankStatementParser:
@@ -28,15 +45,30 @@ class BankStatementParser:
 
     def __init__(self):
         self.column_mappings = {
-            # Hebrew column names to English
+            # Standard / FibiBank format
             'תאריך פעילות': 'activity_date',
             'תאריך תמצית': 'statement_date',
             'אסמכתא': 'reference',
             'תאור פעולה': 'description',
             'זכות': 'credit',
             'חובה': 'debit',
-            'יתרה': 'balance'
+            'יתרה': 'balance',
+            # Leumi XLSX / Leumi XLS (HTML) format
+            'תאריך': 'activity_date',
+            'תאריך ערך': 'statement_date',
+            'תיאור': 'description',
+            'בזכות': 'credit',
+            'בחובה': 'debit',
+            'היתרה בש"ח': 'balance',
+            'תאור מורחב': 'extended_description',
+            # FibiSave XLS format (some columns overlap with above)
+            'תאור': 'description',     # FibiSave uses short form
+            'סוג פעולה': 'action_type',
         }
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def parse_excel(
         self,
@@ -45,21 +77,19 @@ class BankStatementParser:
         return_all: bool = False
     ) -> Tuple[List[Dict], Dict]:
         """
-        Parse bank statement Excel file
+        Parse bank statement Excel file.
 
         Args:
-            file_content: Binary content of Excel file
-            filename: Original filename
+            file_content: Binary content of Excel file.
+            filename: Original filename (used to pick engine).
             return_all: If True, return all transactions including fees/transfers.
-                        If False (default), filter to payment transactions only.
 
         Returns:
             Tuple of (transactions list, metadata dict)
         """
-        # Read Excel file
-        df = pd.read_excel(file_content, engine='openpyxl')
+        df = self._read_to_dataframe(file_content, filename)
 
-        # Normalize column names
+        # Normalize column names (Hebrew → English)
         df = self._normalize_columns(df)
 
         # Extract metadata
@@ -74,80 +104,196 @@ class BankStatementParser:
 
         return transactions, metadata
 
+    # ------------------------------------------------------------------
+    # File reading with format auto-detection
+    # ------------------------------------------------------------------
+
+    def _read_to_dataframe(self, file_content: bytes, filename: str) -> pd.DataFrame:
+        """
+        Read Excel/XLS file into a DataFrame with the correct header row.
+        Handles:
+          1. Standard XLSX (openpyxl)  — header auto-detected
+          2. FibiSave real XLS (xlrd)  — header auto-detected
+          3. Leumi XLS that is actually HTML  — parsed with read_html
+        """
+        lower = filename.lower()
+        is_xls = lower.endswith('.xls') and not lower.endswith('.xlsx')
+
+        if is_xls:
+            df = self._read_xls(file_content, filename)
+        else:
+            df = self._read_xlsx(file_content)
+
+        return df
+
+    def _read_xlsx(self, file_content: bytes) -> pd.DataFrame:
+        """Read a real XLSX file, auto-detecting the header row."""
+        raw = pd.read_excel(io.BytesIO(file_content), header=None, engine='openpyxl')
+        return self._detect_and_reread_header(raw, file_content, engine='openpyxl')
+
+    def _read_xls(self, file_content: bytes, filename: str) -> pd.DataFrame:
+        """
+        Try to read XLS. Falls back to HTML parsing for bank exports
+        that masquerade as XLS.
+        """
+        try:
+            raw = pd.read_excel(io.BytesIO(file_content), header=None, engine='xlrd')
+            return self._detect_and_reread_header(raw, file_content, engine='xlrd')
+        except Exception:
+            # File is not a real XLS — try HTML (Leumi-style export)
+            return self._read_html_xls(file_content)
+
+    def _detect_and_reread_header(
+        self,
+        raw: pd.DataFrame,
+        file_content: bytes,
+        engine: str,
+    ) -> pd.DataFrame:
+        """
+        Scan the first 20 rows of *raw* (no-header read) for a header row,
+        then re-read with that row as the column header.
+        Falls back to row 0 if nothing is found.
+        Always re-reads so that columns are named (not integer-indexed).
+        """
+        header_row = self._find_header_row(raw)
+        return pd.read_excel(
+            io.BytesIO(file_content),
+            header=header_row,
+            engine=engine,
+        )
+
+    def _find_header_row(self, raw: pd.DataFrame, max_scan: int = 20) -> int:
+        """
+        Return the 0-based index of the row that looks like a header.
+        A row qualifies if it contains ≥ 2 known header keywords.
+        Returns 0 (no skip) if nothing better is found.
+        """
+        best_row = 0
+        best_score = 0
+
+        for i in range(min(max_scan, len(raw))):
+            row_vals = {
+                str(v).strip()
+                for v in raw.iloc[i].values
+                if pd.notna(v) and str(v).strip()
+            }
+            score = len(row_vals & HEADER_KEYWORDS)
+            if score > best_score:
+                best_score = score
+                best_row = i
+
+        return best_row if best_score >= 2 else 0
+
+    def _read_html_xls(self, file_content: bytes) -> pd.DataFrame:
+        """
+        Parse a Leumi-style XLS that is really an HTML document.
+        Finds the table whose first few rows contain known header keywords,
+        then promotes that row to the column header.
+        """
+        tables = pd.read_html(io.BytesIO(file_content), encoding='utf-8')
+
+        # Sort by table size (largest first) so we find the transactions table first
+        for table in sorted(tables, key=len, reverse=True):
+            for i in range(min(5, len(table))):
+                row_vals = {
+                    str(v).strip()
+                    for v in table.iloc[i].values
+                    if pd.notna(v) and str(v).strip() != 'nan'
+                }
+                if len(row_vals & HEADER_KEYWORDS) >= 3:
+                    # Promote this row to header
+                    new_cols = list(table.iloc[i])
+                    df = table.iloc[i + 1:].copy()
+                    df.columns = new_cols
+                    df = df.reset_index(drop=True)
+                    return df
+
+        # Last-resort: return the largest table as-is
+        if tables:
+            return max(tables, key=len)
+        raise ValueError("No parseable tables found in HTML XLS file")
+
+    # ------------------------------------------------------------------
+    # Column normalization
+    # ------------------------------------------------------------------
+
     def _normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Normalize Hebrew column names to English"""
-        # Create a mapping of actual columns to standard names
+        """Rename Hebrew column names to English equivalents."""
         column_map = {}
         for col in df.columns:
             col_str = str(col).strip()
             if col_str in self.column_mappings:
                 column_map[col] = self.column_mappings[col_str]
+        return df.rename(columns=column_map)
 
-        # Rename columns
-        df = df.rename(columns=column_map)
+    # ------------------------------------------------------------------
+    # Metadata extraction
+    # ------------------------------------------------------------------
 
-        return df
-
-    def _extract_metadata(
-        self,
-        df: pd.DataFrame,
-        filename: str
-    ) -> Dict:
+    def _extract_metadata(self, df: pd.DataFrame, filename: str) -> Dict:
         """Extract statement metadata (period, account, etc.)"""
         metadata = {
             'filename': filename,
             'row_count': len(df),
             'period_month': None,
-            'period_year': None
+            'period_year': None,
         }
 
-        # Try to extract period from dates
         if 'activity_date' in df.columns:
             valid_dates = df['activity_date'].dropna()
             if len(valid_dates) > 0:
-                # Get the most common month/year
                 if isinstance(valid_dates.iloc[0], str):
-                    # Parse date strings
-                    dates = pd.to_datetime(valid_dates, format='%d/%m/%y', errors='coerce')
+                    dates = pd.to_datetime(valid_dates, dayfirst=True, errors='coerce')
                 else:
-                    dates = valid_dates
+                    dates = pd.to_datetime(valid_dates, errors='coerce')
 
                 dates = dates.dropna()
                 if len(dates) > 0:
-                    # Use the latest date for period
                     latest_date = dates.max()
                     metadata['period_month'] = latest_date.month
                     metadata['period_year'] = latest_date.year
 
         return metadata
 
+    # ------------------------------------------------------------------
+    # Transaction parsing
+    # ------------------------------------------------------------------
+
     def _parse_transactions(self, df: pd.DataFrame) -> List[Dict]:
-        """Parse individual transactions from dataframe"""
+        """Parse individual transactions from the normalised DataFrame."""
         transactions = []
 
-        for idx, row in df.iterrows():
-            # Skip rows without description
-            if pd.isna(row.get('description')):
+        for _, row in df.iterrows():
+            # Must have a description
+            raw_desc = row.get('description')
+            if pd.isna(raw_desc):
                 continue
-
-            description = str(row['description']).strip()
-
-            # Skip empty descriptions
+            description = str(raw_desc).strip()
             if not description:
                 continue
 
-            # Parse date
+            # Must have a parseable date
             activity_date = self._parse_date(row.get('activity_date'))
             if not activity_date:
                 continue
 
-            # Extract amounts
             credit = self._parse_amount(row.get('credit'))
             debit = self._parse_amount(row.get('debit'))
             balance = self._parse_amount(row.get('balance'))
 
-            # Extract payer name from description
-            payer_name = self._extract_payer_name(description)
+            # Determine payer name — priority order:
+            # 1. Extended description (Leumi format: "העברה מאת: NAME ACCOUNT NOTE")
+            # 2. Label column (FibiSave format: pre-labelled tenant name)
+            # 3. Regular description extraction (standard format: "BANK - NAME")
+            ext = row.get('extended_description')
+            label = row.get('label')
+
+            if pd.notna(ext) and str(ext).strip():
+                payer_name = self._extract_payer_from_extended(str(ext).strip())
+            elif pd.notna(label) and str(label).strip():
+                payer_name = str(label).strip()
+            else:
+                payer_name = self._extract_payer_name(description)
 
             transaction = {
                 'activity_date': activity_date,
@@ -157,126 +303,123 @@ class BankStatementParser:
                 'credit_amount': credit,
                 'debit_amount': debit,
                 'balance': balance,
-                'transaction_type': self._classify_transaction(description, credit, debit)
+                'transaction_type': self._classify_transaction(description, credit, debit),
             }
-
             transactions.append(transaction)
 
         return transactions
 
-    def _parse_date(self, date_value) -> Optional[datetime]:
-        """Parse date from various formats"""
-        if pd.isna(date_value):
-            return None
+    # ------------------------------------------------------------------
+    # Payer name extraction helpers
+    # ------------------------------------------------------------------
 
-        # If already datetime
-        if isinstance(date_value, datetime):
-            return date_value
+    def _extract_payer_from_extended(self, extended_desc: str) -> Optional[str]:
+        """
+        Extract payer name from Leumi extended description.
 
-        # If string, try to parse
-        if isinstance(date_value, str):
-            # Common Israeli format: DD/MM/YY or DD/MM/YYYY
-            try:
-                return pd.to_datetime(date_value, format='%d/%m/%y')
-            except:
-                try:
-                    return pd.to_datetime(date_value, format='%d/%m/%Y')
-                except:
-                    return None
+        Format: "העברה מאת: [name] [account-number] [optional note]"
+        Account number pattern: digits-digits-digits, e.g. "12-746-000059916"
+        """
+        prefix = 'העברה מאת: '
+        if prefix not in extended_desc:
+            return extended_desc.strip() or None
 
-        return None
+        after_prefix = extended_desc[len(prefix):]
 
-    def _parse_amount(self, value) -> Optional[float]:
-        """Parse amount from string or number"""
-        if pd.isna(value):
-            return None
+        # Account number looks like "12-746-000059916" or "31-008-105619405"
+        match = re.search(r'\d{1,2}-\d{3}-\d+', after_prefix)
+        if match:
+            name = after_prefix[:match.start()].strip().rstrip(',').strip()
+            return name if name else None
 
-        if isinstance(value, (int, float)):
-            return float(value)
-
-        # If string, remove commas and parse
-        if isinstance(value, str):
-            cleaned = value.replace(',', '').strip()
-            try:
-                return float(cleaned)
-            except:
-                return None
-
-        return None
+        return after_prefix.strip() or None
 
     def _extract_payer_name(self, description: str) -> Optional[str]:
         """
-        Extract payer name from transaction description.
+        Extract payer name from standard transaction description.
         Format: "[bank name]    -  [payer name]"
         """
-        # Remove extra whitespace
         description = ' '.join(description.split())
 
-        # Look for pattern: bank name - payer name
-        # First try spaced separator " - " to avoid splitting bank names with hyphens
-        # e.g., "אוצר-חיל - זינגר עמית" should split as ["אוצר-חיל", "זינגר עמית"]
         if ' - ' in description:
             parts = description.split(' - ', 1)
             if len(parts) == 2:
                 name = parts[1].strip()
                 return name if name else None
 
-        # Fallback: try splitting on "-" with optional whitespace
-        # But skip if the "-" is between two Hebrew chars (likely part of a word/name)
         if '-' in description:
             parts = re.split(r'(?<!\S)-\s+|\s+-(?!\S)', description, maxsplit=1)
             if len(parts) == 2:
                 name = parts[1].strip()
                 return name if name else None
 
-        # If no separator, try to remove known bank names
         cleaned = description
         for bank in self.BANK_NAMES:
             cleaned = cleaned.replace(bank, '').strip()
 
         return cleaned if cleaned != description else None
 
+    # ------------------------------------------------------------------
+    # Amount / date helpers
+    # ------------------------------------------------------------------
+
+    def _parse_date(self, date_value) -> Optional[datetime]:
+        """Parse date from various formats."""
+        if pd.isna(date_value):
+            return None
+        if isinstance(date_value, datetime):
+            return date_value
+        if isinstance(date_value, str):
+            for fmt in ('%d/%m/%y', '%d/%m/%Y', '%d.%m.%Y', '%d.%m.%y'):
+                try:
+                    return datetime.strptime(date_value.strip(), fmt)
+                except ValueError:
+                    continue
+        return None
+
+    def _parse_amount(self, value) -> Optional[float]:
+        """Parse amount from string or number."""
+        if pd.isna(value):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            cleaned = value.replace(',', '').strip()
+            try:
+                return float(cleaned)
+            except ValueError:
+                return None
+        return None
+
+    # ------------------------------------------------------------------
+    # Classification & filtering
+    # ------------------------------------------------------------------
+
     def _classify_transaction(
         self,
         description: str,
         credit: Optional[float],
-        debit: Optional[float]
+        debit: Optional[float],
     ) -> str:
-        """Classify transaction type"""
-        description_lower = description.lower()
-
-        # Check for fees
+        """Classify transaction type."""
         for keyword in self.FEE_KEYWORDS:
             if keyword in description:
                 return 'fee'
-
-        # If debit (outgoing), it's a transfer/expense
         if debit and debit > 0:
             return 'transfer'
-
-        # If credit (incoming), likely a payment
         if credit and credit > 0:
             return 'payment'
-
         return 'other'
 
     def _filter_transactions(self, transactions: List[Dict]) -> List[Dict]:
-        """Filter out non-payment transactions"""
+        """Filter out non-payment transactions."""
         filtered = []
-
         for trans in transactions:
-            # Skip fees
             if trans['transaction_type'] == 'fee':
                 continue
-
-            # Skip summary rows
-            if any(keyword in trans['description'] for keyword in ['סה"כ', 'סיכום', 'סה״כ']):
+            if any(kw in trans['description'] for kw in ['סה"כ', 'סיכום', 'סה״כ']):
                 continue
-
-            # Skip transfers (outgoing payments)
             if trans['transaction_type'] == 'transfer':
                 continue
-
             filtered.append(trans)
-
         return filtered

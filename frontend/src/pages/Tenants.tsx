@@ -81,7 +81,7 @@ export default function Tenants() {
       case 'name':
         return a.name.localeCompare(b.name, 'he') * dir;
       case 'ownership_type':
-        return a.ownership_type.localeCompare(b.ownership_type, 'he') * dir;
+        return (a.ownership_type || '').localeCompare(b.ownership_type || '', 'he') * dir;
       case 'language':
         return a.language.localeCompare(b.language) * dir;
       case 'has_standing_order':
@@ -298,8 +298,8 @@ export default function Tenants() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${OWNERSHIP_COLOR[tenant.ownership_type] || 'bg-gray-100 text-gray-700'}`}>
-                          {tenant.ownership_type}
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${OWNERSHIP_COLOR[tenant.ownership_type ?? ''] || 'bg-gray-100 text-gray-700'}`}>
+                          {tenant.ownership_type || '—'}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600" dir="ltr">

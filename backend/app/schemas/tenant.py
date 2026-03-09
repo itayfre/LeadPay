@@ -12,7 +12,7 @@ class TenantBase(BaseModel):
     phone: Optional[str] = None
     email: Optional[EmailStr] = None
     language: LanguagePreference = LanguagePreference.HEBREW
-    ownership_type: OwnershipType
+    ownership_type: Optional[OwnershipType] = None
     is_committee_member: bool = False
     has_standing_order: bool = False
     bank_name: Optional[str] = None

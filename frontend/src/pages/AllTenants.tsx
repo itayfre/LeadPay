@@ -13,6 +13,20 @@ const OWNERSHIP_COLOR: Record<string, string> = {
   'שוכר': 'bg-green-100 text-green-800',
 };
 
+const SortIcon = ({
+  col,
+  sortColumn,
+  sortDirection,
+}: {
+  col: string;
+  sortColumn: string;
+  sortDirection: 'asc' | 'desc';
+}) => (
+  <span className={`mr-1 text-xs ${sortColumn === col ? 'text-blue-600' : 'text-gray-300'}`}>
+    {sortColumn === col ? (sortDirection === 'asc' ? '▲' : '▼') : '⇅'}
+  </span>
+);
+
 export default function AllTenants() {
   const queryClient = useQueryClient();
 
@@ -28,6 +42,14 @@ export default function AllTenants() {
   const [editingPaymentValue, setEditingPaymentValue] = useState<string>('');
   const [savingPayment, setSavingPayment] = useState(false);
 
+  // Sort state
+  const [sortColumn, setSortColumn] = useState('building_name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  // Filter state
+  const [filterActive, setFilterActive] = useState<'' | 'active' | 'inactive'>('');
+  const [filterPayment, setFilterPayment] = useState<'' | 'set' | 'unset'>('');
+
   const { data: buildings } = useQuery({
     queryKey: ['buildings'],
     queryFn: () => buildingsAPI.list(),
@@ -41,6 +63,15 @@ export default function AllTenants() {
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['tenants'] });
     queryClient.invalidateQueries({ queryKey: ['buildings'] });
+  };
+
+  const handleSort = (col: string) => {
+    if (sortColumn === col) {
+      setSortDirection(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortColumn(col);
+      setSortDirection('asc');
+    }
   };
 
   const handleDelete = async () => {
@@ -85,23 +116,49 @@ export default function AllTenants() {
     }
   };
 
+  // Filter
   const filtered = (tenants || []).filter(t => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      t.name.toLowerCase().includes(q) ||
-      (t.full_name || '').toLowerCase().includes(q) ||
-      (t.phone || '').includes(q) ||
-      String(t.apartment_number || '').includes(q)
-    );
+    if (filterActive === 'active' && !t.is_active) return false;
+    if (filterActive === 'inactive' && t.is_active) return false;
+    if (filterPayment === 'set' && t.expected_payment == null) return false;
+    if (filterPayment === 'unset' && t.expected_payment != null) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (
+        !t.name.toLowerCase().includes(q) &&
+        !(t.full_name || '').toLowerCase().includes(q) &&
+        !(t.phone || '').includes(q) &&
+        !String(t.apartment_number || '').includes(q)
+      ) return false;
+    }
+    return true;
   });
 
+  // Sort
   const sorted = [...filtered].sort((a, b) => {
-    if (a.building_name !== b.building_name) {
-      return (a.building_name || '').localeCompare(b.building_name || '', 'he');
+    const dir = sortDirection === 'asc' ? 1 : -1;
+    switch (sortColumn) {
+      case 'building_name':
+        return dir * (a.building_name || '').localeCompare(b.building_name || '', 'he');
+      case 'apartment_number':
+        return dir * ((a.apartment_number || 0) - (b.apartment_number || 0));
+      case 'name':
+        return dir * a.name.localeCompare(b.name, 'he');
+      case 'ownership_type':
+        return dir * (a.ownership_type || '').localeCompare(b.ownership_type || '', 'he');
+      case 'is_active':
+        return dir * (Number(b.is_active) - Number(a.is_active));
+      case 'expected_payment':
+        return dir * ((a.expected_payment ?? a.building_expected_payment ?? 0) - (b.expected_payment ?? b.building_expected_payment ?? 0));
+      case 'move_in_date':
+        return dir * (a.move_in_date || '').localeCompare(b.move_in_date || '');
+      default:
+        return 0;
     }
-    return (a.apartment_number || 0) - (b.apartment_number || 0);
   });
+
+  const thClass = "px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 transition-colors";
+  const thStaticClass = "px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider";
 
   return (
     <Layout>
@@ -149,6 +206,24 @@ export default function AllTenants() {
               <option key={b.id} value={b.id}>{b.name}</option>
             ))}
           </select>
+          <select
+            value={filterActive}
+            onChange={e => setFilterActive(e.target.value as '' | 'active' | 'inactive')}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          >
+            <option value="">כל הסטטוסים</option>
+            <option value="active">פעילים בלבד</option>
+            <option value="inactive">לא פעילים</option>
+          </select>
+          <select
+            value={filterPayment}
+            onChange={e => setFilterPayment(e.target.value as '' | 'set' | 'unset')}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          >
+            <option value="">כל התשלומים</option>
+            <option value="set">תשלום מותאם אישית</option>
+            <option value="unset">תשלום ברירת מחדל</option>
+          </select>
         </div>
 
         {/* Table */}
@@ -188,11 +263,32 @@ export default function AllTenants() {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    {['בניין', 'דירה', 'שם', 'סוג בעלות', 'טלפון', 'בנק', 'שפה', 'ה.קבע', 'פעיל', 'תשלום צפוי', 'פעולות'].map(col => (
-                      <th key={col} className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        {col}
-                      </th>
-                    ))}
+                    <th onClick={() => handleSort('building_name')} className={thClass}>
+                      בניין<SortIcon col="building_name" sortColumn={sortColumn} sortDirection={sortDirection} />
+                    </th>
+                    <th onClick={() => handleSort('apartment_number')} className={thClass}>
+                      דירה<SortIcon col="apartment_number" sortColumn={sortColumn} sortDirection={sortDirection} />
+                    </th>
+                    <th onClick={() => handleSort('name')} className={thClass}>
+                      שם<SortIcon col="name" sortColumn={sortColumn} sortDirection={sortDirection} />
+                    </th>
+                    <th onClick={() => handleSort('ownership_type')} className={thClass}>
+                      סוג בעלות<SortIcon col="ownership_type" sortColumn={sortColumn} sortDirection={sortDirection} />
+                    </th>
+                    <th className={thStaticClass}>טלפון</th>
+                    <th className={thStaticClass}>בנק</th>
+                    <th className={thStaticClass}>שפה</th>
+                    <th className={thStaticClass}>ה.קבע</th>
+                    <th onClick={() => handleSort('is_active')} className={thClass}>
+                      פעיל<SortIcon col="is_active" sortColumn={sortColumn} sortDirection={sortDirection} />
+                    </th>
+                    <th onClick={() => handleSort('move_in_date')} className={thClass}>
+                      תאריך כניסה<SortIcon col="move_in_date" sortColumn={sortColumn} sortDirection={sortDirection} />
+                    </th>
+                    <th onClick={() => handleSort('expected_payment')} className={thClass}>
+                      תשלום צפוי<SortIcon col="expected_payment" sortColumn={sortColumn} sortDirection={sortDirection} />
+                    </th>
+                    <th className={thStaticClass}>פעולות</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
@@ -211,9 +307,13 @@ export default function AllTenants() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${OWNERSHIP_COLOR[tenant.ownership_type] || 'bg-gray-100 text-gray-700'}`}>
-                          {tenant.ownership_type}
-                        </span>
+                        {tenant.ownership_type ? (
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${OWNERSHIP_COLOR[tenant.ownership_type] || 'bg-gray-100 text-gray-700'}`}>
+                            {tenant.ownership_type}
+                          </span>
+                        ) : (
+                          <span className="text-gray-300 text-xs">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600" dir="ltr">
                         {tenant.phone || '—'}
@@ -235,6 +335,11 @@ export default function AllTenants() {
                         ) : (
                           <span className="inline-block w-2.5 h-2.5 bg-gray-300 rounded-full"></span>
                         )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-500" dir="ltr">
+                        {tenant.move_in_date
+                          ? new Date(tenant.move_in_date).toLocaleDateString('he-IL', { year: 'numeric', month: '2-digit' })
+                          : '—'}
                       </td>
                       <td className="px-4 py-3 text-sm">
                         {editingPaymentId === tenant.id ? (

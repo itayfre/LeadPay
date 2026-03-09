@@ -16,6 +16,7 @@ export interface Building {
 export interface BuildingPaymentSummary {
   building_id: string;
   paid: number;
+  partial?: number;
   unpaid: number;
   total_tenants: number;
   collection_rate: number;      // 0–100
@@ -32,7 +33,7 @@ export interface Tenant {
   phone?: string;
   email?: string;
   language: 'he' | 'en';
-  ownership_type: 'בעלים' | 'משכיר' | 'שוכר';
+  ownership_type?: 'בעלים' | 'משכיר' | 'שוכר' | null;
   is_committee_member: boolean;
   has_standing_order: boolean;
   bank_name?: string;
@@ -57,7 +58,7 @@ export interface PaymentStatus {
   expected_amount: number;
   paid_amount: number;
   difference: number;
-  status: 'paid' | 'unpaid';
+  status: 'paid' | 'partial' | 'unpaid';
   is_overpaid: boolean;
   is_underpaid: boolean;
   phone?: string;
@@ -74,6 +75,7 @@ export interface PaymentStatusResponse {
   summary: {
     total_tenants: number;
     paid: number;
+    partial: number;
     unpaid: number;
     total_expected: number;
     total_collected: number;

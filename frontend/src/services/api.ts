@@ -159,7 +159,7 @@ export const tenantsAPI = {
     building_id: string;
     name: string;
     full_name?: string;
-    ownership_type: string;
+    ownership_type?: string;
     phone?: string;
     email?: string;
     bank_name?: string;
@@ -167,6 +167,7 @@ export const tenantsAPI = {
     language?: string;
     has_standing_order?: boolean;
     is_active?: boolean;
+    move_in_date?: string;
   }) =>
     fetchAPI<Tenant>('/api/v1/tenants/', {
       method: 'POST',

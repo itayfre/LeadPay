@@ -178,6 +178,7 @@ export default function Dashboard() {
   const summary = paymentStatus?.summary || {
     total_tenants: 0,
     paid: 0,
+    partial: 0,
     unpaid: 0,
     total_expected: 0,
     total_collected: 0,
@@ -268,7 +269,7 @@ export default function Dashboard() {
         ) : (
           <>
             {/* Summary Statistics */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
               <StatCard
                 title={t('dashboard.paid')}
                 value={summary.paid}
@@ -276,6 +277,15 @@ export default function Dashboard() {
                 color="green"
                 icon="✅"
               />
+              {(summary.partial ?? 0) > 0 && (
+                <StatCard
+                  title="חלקי"
+                  value={summary.partial ?? 0}
+                  total={summary.total_tenants}
+                  color="orange"
+                  icon="⚠️"
+                />
+              )}
               <StatCard
                 title={t('dashboard.unpaid')}
                 value={summary.unpaid}
@@ -420,10 +430,16 @@ export default function Dashboard() {
                           className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                             payment.status === 'paid'
                               ? 'bg-green-100 text-green-800'
+                              : payment.status === 'partial'
+                              ? 'bg-orange-100 text-orange-800'
                               : 'bg-red-100 text-red-800'
                           }`}
                         >
-                          {payment.status === 'paid' ? '✅ ' + t('dashboard.paid') : '❌ ' + t('dashboard.unpaid')}
+                          {payment.status === 'paid'
+                            ? '✅ ' + t('dashboard.paid')
+                            : payment.status === 'partial'
+                            ? '⚠️ חלקי'
+                            : '❌ ' + t('dashboard.unpaid')}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -555,7 +571,7 @@ interface StatCardProps {
   title: string;
   value: string | number;
   total?: number;
-  color: 'green' | 'red' | 'blue' | 'purple';
+  color: 'green' | 'red' | 'blue' | 'purple' | 'orange';
   icon: string;
 }
 
@@ -565,6 +581,7 @@ function StatCard({ title, value, total, color, icon }: StatCardProps) {
     red: 'bg-red-50 border-red-200 text-red-800',
     blue: 'bg-blue-50 border-blue-200 text-blue-800',
     purple: 'bg-purple-50 border-purple-200 text-purple-800',
+    orange: 'bg-orange-50 border-orange-200 text-orange-800',
   };
 
   return (

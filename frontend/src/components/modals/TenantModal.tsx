@@ -27,7 +27,7 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
     apartment_number: '',
     name: '',
     full_name: '',
-    ownership_type: 'שוכר',
+    ownership_type: '',
     phone: '',
     email: '',
     bank_name: '',
@@ -35,6 +35,7 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
     language: 'he',
     has_standing_order: false,
     is_active: true,
+    move_in_date: '2026-01-01',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +47,7 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
         apartment_number: String(tenant.apartment_number || ''),
         name: tenant.name || '',
         full_name: tenant.full_name || '',
-        ownership_type: tenant.ownership_type || 'שוכר',
+        ownership_type: tenant.ownership_type || '',
         phone: tenant.phone || '',
         email: tenant.email || '',
         bank_name: tenant.bank_name || '',
@@ -54,6 +55,7 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
         language: tenant.language || 'he',
         has_standing_order: tenant.has_standing_order || false,
         is_active: tenant.is_active !== false,
+        move_in_date: tenant.move_in_date || '2026-01-01',
       });
     }
   }, [tenant, buildingId]);
@@ -64,7 +66,7 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
 
     const effectiveBuildingId = buildingId || form.selected_building_id;
 
-    if (!form.apartment_number || !form.name || !form.ownership_type) {
+    if (!form.apartment_number || !form.name) {
       setError('נא למלא את כל השדות הנדרשים');
       return;
     }
@@ -79,7 +81,7 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
         await tenantsAPI.update(tenant.id, {
           name: form.name,
           full_name: form.full_name || undefined,
-          ownership_type: form.ownership_type as Tenant['ownership_type'],
+          ownership_type: form.ownership_type ? form.ownership_type as Tenant['ownership_type'] : undefined,
           phone: form.phone || undefined,
           email: form.email || undefined,
           bank_name: form.bank_name || undefined,
@@ -87,6 +89,7 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
           language: form.language as 'he' | 'en',
           has_standing_order: form.has_standing_order,
           is_active: form.is_active,
+          move_in_date: form.move_in_date || undefined,
         });
       } else {
         const { apartment_id } = await tenantsAPI.resolveApartment(
@@ -98,7 +101,7 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
           building_id: effectiveBuildingId,
           name: form.name,
           full_name: form.full_name || undefined,
-          ownership_type: form.ownership_type,
+          ownership_type: form.ownership_type || undefined,
           phone: form.phone || undefined,
           email: form.email || undefined,
           bank_name: form.bank_name || undefined,
@@ -106,6 +109,7 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
           language: form.language,
           has_standing_order: form.has_standing_order,
           is_active: form.is_active,
+          move_in_date: form.move_in_date || undefined,
         });
       }
       onSaved();
@@ -165,12 +169,13 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
             </div>
 
             <div>
-              <label className={labelClass}>סוג בעלות *</label>
+              <label className={labelClass}>סוג בעלות</label>
               <select
                 value={form.ownership_type}
                 onChange={e => setForm(f => ({ ...f, ownership_type: e.target.value }))}
-                required className={inputClass}
+                className={inputClass}
               >
+                <option value="">— לא מוגדר —</option>
                 {OWNERSHIP_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
@@ -215,6 +220,13 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
               <input type="text" value={form.bank_account}
                 onChange={e => setForm(f => ({ ...f, bank_account: e.target.value }))}
                 className={inputClass} placeholder="12-345678" dir="ltr" />
+            </div>
+
+            <div>
+              <label className={labelClass}>תאריך כניסה</label>
+              <input type="date" value={form.move_in_date}
+                onChange={e => setForm(f => ({ ...f, move_in_date: e.target.value }))}
+                className={inputClass} dir="ltr" />
             </div>
 
             <div>
