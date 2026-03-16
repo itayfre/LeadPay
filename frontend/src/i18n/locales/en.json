@@ -8,7 +8,20 @@
     "buildings": "Buildings",
     "payments": "Payments",
     "messages": "Messages",
-    "settings": "Settings"
+    "settings": "Settings",
+    "tenants": "Tenants",
+    "statements": "Bank Statements",
+    "users": "User Management"
+  },
+  "layout": {
+    "welcome": "Welcome to LeadPay",
+    "tagline": "Manage tenant payments easily"
+  },
+  "roles": {
+    "manager": "Manager",
+    "worker": "Worker",
+    "viewer": "Viewer",
+    "tenant": "Tenant"
   },
   "dashboard": {
     "title": "Payment Status",
@@ -16,19 +29,41 @@
     "uploadStatement": "Upload Statement",
     "sendReminders": "Send Reminders",
     "paid": "Paid",
+    "partial": "Partial",
     "unpaid": "Unpaid",
     "totalExpected": "Expected",
     "totalCollected": "Collected",
-    "collectionRate": "Collection Rate"
+    "collectionRate": "Collection Rate",
+    "noTenants": "No tenants registered",
+    "noTenantsHint": "Add tenants to track payments",
+    "manageTenants": "Manage Tenants"
   },
   "payment": {
-    "apartment": "Apartment",
+    "apartment": "Apt",
     "tenant": "Tenant",
     "expected": "Expected",
     "paid": "Paid",
     "status": "Status",
     "actions": "Actions",
     "sendWhatsApp": "Send Message"
+  },
+  "buildings": {
+    "addBuilding": "Add Building",
+    "searchPlaceholder": "Search by name or address...",
+    "allCities": "All Cities",
+    "filterSize": "Size:",
+    "filterStatus": "Status:",
+    "all": "All",
+    "allPaid": "✅ All Paid",
+    "partialPaid": "⚠️ Partial",
+    "nonePaid": "❌ None Paid",
+    "small": "Small (1–5)",
+    "medium": "Medium (6–15)",
+    "large": "Large (16+)",
+    "noData": "No data for this period",
+    "viewPayments": "View Payment Status",
+    "editDetails": "Edit Details",
+    "deleteBuilding": "Delete Building"
   },
   "whatsapp": {
     "title": "Send WhatsApp Reminders",

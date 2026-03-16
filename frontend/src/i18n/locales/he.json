@@ -8,7 +8,20 @@
     "buildings": "בניינים",
     "payments": "תשלומים",
     "messages": "הודעות",
-    "settings": "הגדרות"
+    "settings": "הגדרות",
+    "tenants": "דיירים",
+    "statements": "העלאת דפי חשבון",
+    "users": "ניהול משתמשים"
+  },
+  "layout": {
+    "welcome": "ברוך הבא ל-LeadPay",
+    "tagline": "נהל את תשלומי הדיירים בקלות"
+  },
+  "roles": {
+    "manager": "מנהל",
+    "worker": "עובד",
+    "viewer": "צופה",
+    "tenant": "דייר"
   },
   "dashboard": {
     "title": "סטטוס תשלומים",
@@ -16,10 +29,14 @@
     "uploadStatement": "העלה דף חשבון",
     "sendReminders": "שלח תזכורות",
     "paid": "שילמו",
+    "partial": "חלקי",
     "unpaid": "לא שילמו",
     "totalExpected": "צפוי",
     "totalCollected": "נגבה",
-    "collectionRate": "אחוז גבייה"
+    "collectionRate": "אחוז גבייה",
+    "noTenants": "אין דיירים רשומים",
+    "noTenantsHint": "הוסף דיירים כדי לעקוב אחר תשלומים",
+    "manageTenants": "ניהול דיירים"
   },
   "payment": {
     "apartment": "דירה",
@@ -29,6 +46,24 @@
     "status": "סטטוס",
     "actions": "פעולות",
     "sendWhatsApp": "שלח הודעה"
+  },
+  "buildings": {
+    "addBuilding": "הוסף בניין",
+    "searchPlaceholder": "חיפוש לפי שם או כתובת...",
+    "allCities": "כל הערים",
+    "filterSize": "גודל:",
+    "filterStatus": "סטטוס:",
+    "all": "הכל",
+    "allPaid": "✅ שילמו הכל",
+    "partialPaid": "⚠️ חלקי",
+    "nonePaid": "❌ לא שילמו",
+    "small": "קטן (1–5)",
+    "medium": "בינוני (6–15)",
+    "large": "גדול (16+)",
+    "noData": "אין נתונים לתקופה זו",
+    "viewPayments": "צפה בסטטוס תשלומים",
+    "editDetails": "ערוך פרטים",
+    "deleteBuilding": "מחק בניין"
   },
   "whatsapp": {
     "title": "שלח תזכורות WhatsApp",

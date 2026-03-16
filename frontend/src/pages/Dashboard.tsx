@@ -209,7 +209,7 @@ export default function Dashboard() {
               onClick={() => navigate(`/building/${buildingId}/tenants`)}
               className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors font-medium text-sm"
             >
-              👥 דיירים
+              👥 {t('nav.tenants')}
             </button>
             <button
               onClick={() => navigate(`/building/${buildingId}/upload`)}
@@ -257,13 +257,13 @@ export default function Dashboard() {
         {summary.total_tenants === 0 ? (
           <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-8 text-center">
             <div className="text-5xl mb-3">👥</div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2">אין דיירים רשומים</h3>
-            <p className="text-gray-600 mb-5">הוסף דיירים כדי לעקוב אחר תשלומים</p>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">{t('dashboard.noTenants')}</h3>
+            <p className="text-gray-600 mb-5">{t('dashboard.noTenantsHint')}</p>
             <button
               onClick={() => navigate(`/building/${buildingId}/tenants`)}
               className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors shadow-md"
             >
-              👥 ניהול דיירים
+              👥 {t('dashboard.manageTenants')}
             </button>
           </div>
         ) : (
@@ -279,7 +279,7 @@ export default function Dashboard() {
               />
               {(summary.partial ?? 0) > 0 && (
                 <StatCard
-                  title="חלקי"
+                  title={t('dashboard.partial')}
                   value={summary.partial ?? 0}
                   total={summary.total_tenants}
                   color="orange"
@@ -438,7 +438,7 @@ export default function Dashboard() {
                           {payment.status === 'paid'
                             ? '✅ ' + t('dashboard.paid')
                             : payment.status === 'partial'
-                            ? '⚠️ חלקי'
+                            ? '⚠️ ' + t('dashboard.partial')
                             : '❌ ' + t('dashboard.unpaid')}
                         </span>
                       </td>

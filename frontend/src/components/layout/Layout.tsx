@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Sidebar from './Sidebar';
+import { useAuth } from '../../context/AuthContext';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { user } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const toggleLanguage = () => {
@@ -36,8 +38,8 @@ export default function Layout({ children }: LayoutProps) {
 
           {/* Breadcrumb / Title */}
           <div className="hidden lg:block">
-            <h2 className="text-xl font-semibold text-gray-900">ברוך הבא ל-LeadPay</h2>
-            <p className="text-sm text-gray-500">נהל את תשלומי הדיירים בקלות</p>
+            <h2 className="text-xl font-semibold text-gray-900">{t('layout.welcome')}</h2>
+            <p className="text-sm text-gray-500">{t('layout.tagline')}</p>
           </div>
 
           {/* Right Side Actions */}
@@ -52,15 +54,17 @@ export default function Layout({ children }: LayoutProps) {
             </button>
 
             {/* User Profile */}
-            <div className="hidden md:flex items-center gap-3 px-4 py-2 rounded-lg bg-gray-100">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-r from-primary-600 to-primary-700 flex items-center justify-center text-white font-bold">
-                A
+            {user && (
+              <div className="hidden md:flex items-center gap-3 px-4 py-2 rounded-lg bg-gray-100">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-r from-primary-600 to-primary-700 flex items-center justify-center text-white font-bold">
+                  {user.full_name.charAt(0).toUpperCase()}
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-semibold text-gray-900">{user.full_name}</p>
+                  <p className="text-xs text-gray-500">{t(`roles.${user.role}`, { defaultValue: user.role })}</p>
+                </div>
               </div>
-              <div className="text-right">
-                <p className="text-sm font-semibold text-gray-900">Admin</p>
-                <p className="text-xs text-gray-500">מנהל מערכת</p>
-              </div>
-            </div>
+            )}
           </div>
         </header>
 

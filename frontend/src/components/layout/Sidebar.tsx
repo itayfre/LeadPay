@@ -7,13 +7,6 @@ interface SidebarProps {
   onClose: () => void;
 }
 
-const roleLabels: Record<string, string> = {
-  manager: 'מנהל',
-  worker: 'עובד',
-  viewer: 'צופה',
-  tenant: 'דייר',
-};
-
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { t } = useTranslation();
   const location = useLocation();
@@ -30,7 +23,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
       ),
     },
     {
-      name: 'דיירים',
+      name: t('nav.tenants'),
       href: '/tenants',
       icon: (
         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -39,7 +32,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
       ),
     },
     {
-      name: 'העלאת דפי חשבון',
+      name: t('nav.statements'),
       href: '/statements',
       icon: (
         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -59,7 +52,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     },
     // Manager-only: user management
     ...(user?.role === 'manager' ? [{
-      name: 'ניהול משתמשים',
+      name: t('nav.users'),
       href: '/users',
       icon: (
         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -146,12 +139,12 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
               {/* Name + role */}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-800 truncate">{user.full_name}</p>
-                <p className="text-xs text-gray-500">{roleLabels[user.role] ?? user.role}</p>
+                <p className="text-xs text-gray-500">{t(`roles.${user.role}`, { defaultValue: user.role })}</p>
               </div>
               {/* Logout */}
               <button
                 onClick={logout}
-                title="יציאה מהמערכת"
+                title={t('common.logout', { defaultValue: 'Logout' })}
                 className="text-gray-400 hover:text-red-500 transition p-1 rounded-lg hover:bg-red-50"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

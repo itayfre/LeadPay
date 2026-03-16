@@ -13,8 +13,34 @@ function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/**
+ * Deduplicated silent refresh: if multiple requests get a 401 simultaneously,
+ * only one refresh attempt is made; all waiters share the same promise.
+ */
+let pendingRefresh: Promise<boolean> | null = null;
+
+async function tryRefreshTokens(): Promise<boolean> {
+  const refreshToken = localStorage.getItem(TOKEN_KEYS.REFRESH);
+  if (!refreshToken) return false;
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      localStorage.setItem(TOKEN_KEYS.ACCESS, data.access_token);
+      if (data.refresh_token) localStorage.setItem(TOKEN_KEYS.REFRESH, data.refresh_token);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
 // Generic fetch wrapper. Automatically omits Content-Type for FormData (lets browser set boundary).
-async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {
+// _retry=true means this is a second attempt after a successful token refresh — don't retry again.
+async function fetchAPI<T>(endpoint: string, options?: RequestInit, _retry = false): Promise<T> {
   const isFormData = options?.body instanceof FormData;
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
     headers: {
@@ -25,8 +51,25 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> 
     ...options,
   });
 
+  if (response.status === 401 && !_retry) {
+    // Access token expired — try a silent refresh before giving up
+    if (!pendingRefresh) {
+      pendingRefresh = tryRefreshTokens().finally(() => { pendingRefresh = null; });
+    }
+    const refreshed = await pendingRefresh;
+    if (refreshed) {
+      // Retry once with the new access token
+      return fetchAPI<T>(endpoint, options, true);
+    }
+    // Refresh failed — clear everything and redirect to login
+    localStorage.removeItem(TOKEN_KEYS.ACCESS);
+    localStorage.removeItem(TOKEN_KEYS.REFRESH);
+    window.location.href = '/login';
+    throw new Error('Session expired. Please log in again.');
+  }
+
   if (response.status === 401) {
-    // Token expired or invalid — redirect to login
+    // Second attempt also 401 — give up
     localStorage.removeItem(TOKEN_KEYS.ACCESS);
     localStorage.removeItem(TOKEN_KEYS.REFRESH);
     window.location.href = '/login';

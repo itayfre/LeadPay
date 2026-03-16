@@ -17,4 +17,16 @@ i18n
     },
   });
 
+// Flip document direction and lang attribute when language changes
+function applyDirection(lng: string) {
+  document.documentElement.dir  = lng === 'he' ? 'rtl' : 'ltr';
+  document.documentElement.lang = lng;
+}
+
+// Apply immediately on load
+applyDirection(i18n.language);
+
+// Apply on every language change
+i18n.on('languageChanged', applyDirection);
+
 export default i18n;
