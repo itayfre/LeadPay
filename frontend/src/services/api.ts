@@ -174,6 +174,18 @@ export const statementsAPI = {
       `/api/v1/statements/transactions/${transactionId}/unmatch`,
       { method: 'POST' }
     ),
+
+  ignoreTransaction: (transactionId: string) =>
+    fetchAPI<{ ok: boolean }>(
+      `/api/v1/statements/transactions/${transactionId}/ignore`,
+      { method: 'POST' }
+    ),
+
+  deleteTransaction: (transactionId: string) =>
+    fetchAPI<void>(
+      `/api/v1/statements/transactions/${transactionId}`,
+      { method: 'DELETE' }
+    ),
 };
 
 // Messages API

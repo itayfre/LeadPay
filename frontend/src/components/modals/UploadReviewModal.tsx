@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { statementsAPI } from '../../services/api';
 import type { StatementReview, ReviewTransaction, MatchSuggestion } from '../../types';
+import ConfirmDialog from './ConfirmDialog';
 
 interface Props {
   statementId: string;
@@ -42,6 +43,66 @@ function formatAmount(amount?: number | null) {
   return `₪${amount.toLocaleString('he-IL', { minimumFractionDigits: 0 })}`;
 }
 
+// ── Inline SVG icons (matches ConfirmDialog.tsx pattern, avoids adding lucide-react dep) ──
+function CheckIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+    </svg>
+  );
+}
+
+function XIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  );
+}
+
+function TrashIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"
+      />
+    </svg>
+  );
+}
+
+// Generic round icon button used for all per-row actions
+interface IconActionProps {
+  title: string;
+  onClick: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+  variant: 'approve' | 'reject' | 'delete';
+  children: React.ReactNode;
+}
+
+function IconAction({ title, onClick, disabled, loading, variant, children }: IconActionProps) {
+  const variantClass = {
+    approve: 'text-gray-400 hover:text-green-600 hover:bg-green-50',
+    reject: 'text-gray-400 hover:text-yellow-600 hover:bg-yellow-50',
+    delete: 'text-gray-400 hover:text-red-600 hover:bg-red-50',
+  }[variant];
+
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      disabled={disabled || loading}
+      className={`p-1.5 rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${variantClass}`}
+    >
+      {loading ? <span className="text-xs">…</span> : children}
+    </button>
+  );
+}
+
 export default function UploadReviewModal({ statementId, buildingId, onClose }: Props) {
   const queryClient = useQueryClient();
 
@@ -50,13 +111,23 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('unmatched');
 
-  // Map transactionId → selected tenantId
+  // Map transactionId → selected tenantId (manual matches not yet committed)
   const [pendingMatches, setPendingMatches] = useState<Record<string, string>>({});
-  const [confirming, setConfirming] = useState(false);
+
+  // Per-row spinners — `null` when no row action is in flight
+  const [busyRow, setBusyRow] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
 
-  // Reject (unmatch) state
-  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  // Confirm dialog state for delete
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  const refreshReview = async () => {
+    const updated = await statementsAPI.getReview(statementId);
+    setReview(updated);
+    queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId] });
+    return updated;
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -64,7 +135,6 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
     statementsAPI.getReview(statementId)
       .then(data => {
         setReview(data);
-        // Default to unmatched tab; if no unmatched items, switch to matched
         if (data.unmatched.length === 0 && data.matched.length > 0) {
           setActiveTab('matched');
         }
@@ -86,9 +156,98 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
 
   const pendingCount = Object.keys(pendingMatches).length;
 
-  const handleConfirm = async () => {
+  // ── Per-row handlers ──
+
+  const handleApproveRow = async (txId: string) => {
+    const tenantId = pendingMatches[txId];
+    if (!tenantId) return;
+    setBusyRow(txId);
+    setConfirmError(null);
+    try {
+      await statementsAPI.manualMatch(txId, tenantId);
+      setPendingMatches(prev => {
+        const next = { ...prev };
+        delete next[txId];
+        return next;
+      });
+      await refreshReview();
+    } catch (err) {
+      setConfirmError((err as Error).message);
+    } finally {
+      setBusyRow(null);
+    }
+  };
+
+  const handleRejectRow = async (txId: string, source: Tab) => {
+    setBusyRow(txId);
+    setConfirmError(null);
+    try {
+      // matched → unmatch (sends back to unmatched tab)
+      // unmatched → mark irrelevant (so it stops appearing as a payment)
+      if (source === 'matched') {
+        await statementsAPI.unmatchTransaction(txId);
+      } else {
+        await statementsAPI.ignoreTransaction(txId);
+      }
+      const updated = await refreshReview();
+      // If the user is on a tab that just emptied, jump them to a populated one
+      if (source === 'matched' && updated.unmatched.length > 0) {
+        setActiveTab('unmatched');
+      }
+    } catch (err) {
+      setConfirmError((err as Error).message);
+    } finally {
+      setBusyRow(null);
+    }
+  };
+
+  const handleDeleteRow = async (txId: string) => {
+    setBusyRow(txId);
+    setConfirmError(null);
+    try {
+      await statementsAPI.deleteTransaction(txId);
+      // Drop any local pending state for this row
+      setPendingMatches(prev => {
+        const next = { ...prev };
+        delete next[txId];
+        return next;
+      });
+      await refreshReview();
+    } catch (err) {
+      setConfirmError((err as Error).message);
+    } finally {
+      setBusyRow(null);
+      setPendingDeleteId(null);
+    }
+  };
+
+  // Bulk: confirm every row the engine auto-matched but hasn't been user-confirmed yet
+  const unconfirmedMatched = review?.matched.filter(t => !t.is_confirmed) ?? [];
+
+  const handleApproveAllSuggestions = async () => {
+    if (unconfirmedMatched.length === 0) return;
+    setBulkBusy(true);
+    setConfirmError(null);
+    try {
+      // Re-issuing manualMatch with the already-matched tenant flips is_confirmed=true
+      // and refreshes the NameMapping — same code path as a manual approval.
+      await Promise.all(
+        unconfirmedMatched
+          .filter(t => t.tenant_id)
+          .map(t => statementsAPI.manualMatch(t.id, t.tenant_id as string))
+      );
+      await refreshReview();
+    } catch (err) {
+      setConfirmError((err as Error).message);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  // Bulk: commit every pending manual match in one go (replaces old "אשר התאמות ידניות")
+  const handleCommitPending = async () => {
     if (pendingCount === 0) return;
-    setConfirming(true);
+    setBulkBusy(true);
     setConfirmError(null);
     try {
       await Promise.all(
@@ -96,34 +255,15 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
           statementsAPI.manualMatch(txId, tenantId)
         )
       );
-      // Refresh review data and dashboard
-      queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId] });
-      // Reload review to move confirmed items to matched tab
-      const updated = await statementsAPI.getReview(statementId);
-      setReview(updated);
       setPendingMatches({});
-      if (updated.unmatched.length === 0) {
+      const updated = await refreshReview();
+      if (updated.unmatched.length === 0 && updated.matched.length > 0) {
         setActiveTab('matched');
       }
     } catch (err) {
       setConfirmError((err as Error).message);
     } finally {
-      setConfirming(false);
-    }
-  };
-
-  const handleReject = async (txId: string) => {
-    setRejectingId(txId);
-    try {
-      await statementsAPI.unmatchTransaction(txId);
-      const updated = await statementsAPI.getReview(statementId);
-      setReview(updated);
-      queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId] });
-      if (updated.unmatched.length > 0) setActiveTab('unmatched');
-    } catch (err) {
-      setConfirmError((err as Error).message);
-    } finally {
-      setRejectingId(null);
+      setBulkBusy(false);
     }
   };
 
@@ -136,235 +276,280 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
     : [];
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
-      <div
-        className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col"
-        dir="rtl"
-      >
-        {/* Header */}
-        <div className="bg-gradient-to-l from-blue-600 to-blue-800 rounded-t-xl px-6 py-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-bold text-white">סקירת הדוח</h2>
-            {review && (
-              <p className="text-blue-200 text-sm mt-0.5">
-                תקופה: {review.period}
-              </p>
-            )}
-          </div>
-          <button
-            onClick={onClose}
-            className="text-white text-2xl leading-none hover:text-blue-200 transition-colors"
-            aria-label="סגור"
-          >
-            ×
-          </button>
-        </div>
-
-        {/* Loading / Error */}
-        {loading && (
-          <div className="flex-1 flex items-center justify-center py-20">
-            <div className="text-center text-gray-500">
-              <div className="text-4xl mb-3">⏳</div>
-              <p>טוען נתונים...</p>
+    <>
+      <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+        <div
+          className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col"
+          dir="rtl"
+        >
+          {/* Header */}
+          <div className="bg-gradient-to-l from-blue-600 to-blue-800 rounded-t-xl px-6 py-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-white">סקירת הדוח</h2>
+              {review && (
+                <p className="text-blue-200 text-sm mt-0.5">
+                  תקופה: {review.period}
+                </p>
+              )}
             </div>
+            <button
+              onClick={onClose}
+              className="text-white text-2xl leading-none hover:text-blue-200 transition-colors"
+              aria-label="סגור"
+            >
+              ×
+            </button>
           </div>
-        )}
-        {error && (
-          <div className="flex-1 flex items-center justify-center py-20">
-            <div className="text-center text-red-600">
-              <div className="text-4xl mb-3">❌</div>
-              <p>{error}</p>
-            </div>
-          </div>
-        )}
 
-        {review && !loading && (
-          <>
-            {/* Tabs */}
-            <div className="border-b border-gray-200 px-6 flex gap-1 pt-2">
-              {tabs.map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors flex items-center gap-2 ${
-                    activeTab === tab.id
-                      ? 'bg-white border border-b-white border-gray-200 text-blue-700 -mb-px'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  {tab.label}
-                  <span
-                    className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${
-                      tab.id === 'unmatched' && tab.count > 0
-                        ? 'bg-red-100 text-red-700'
-                        : tab.id === 'matched'
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-gray-100 text-gray-600'
+          {/* Loading / Error */}
+          {loading && (
+            <div className="flex-1 flex items-center justify-center py-20">
+              <div className="text-center text-gray-500">
+                <div className="text-4xl mb-3">⏳</div>
+                <p>טוען נתונים...</p>
+              </div>
+            </div>
+          )}
+          {error && (
+            <div className="flex-1 flex items-center justify-center py-20">
+              <div className="text-center text-red-600">
+                <div className="text-4xl mb-3">❌</div>
+                <p>{error}</p>
+              </div>
+            </div>
+          )}
+
+          {review && !loading && (
+            <>
+              {/* Tabs */}
+              <div className="border-b border-gray-200 px-6 flex gap-1 pt-2">
+                {tabs.map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors flex items-center gap-2 ${
+                      activeTab === tab.id
+                        ? 'bg-white border border-b-white border-gray-200 text-blue-700 -mb-px'
+                        : 'text-gray-500 hover:text-gray-700'
                     }`}
                   >
-                    {tab.count}
-                  </span>
-                </button>
-              ))}
-            </div>
+                    {tab.label}
+                    <span
+                      className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${
+                        tab.id === 'unmatched' && tab.count > 0
+                          ? 'bg-red-100 text-red-700'
+                          : tab.id === 'matched'
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-gray-100 text-gray-600'
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
 
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto p-6">
-              {/* ── UNMATCHED TAB ── */}
-              {activeTab === 'unmatched' && (
-                <div className="space-y-3">
-                  {review.unmatched.length === 0 ? (
-                    <div className="text-center py-12 text-gray-400">
-                      <div className="text-4xl mb-2">✅</div>
-                      <p>כל העסקאות הותאמו!</p>
-                    </div>
-                  ) : (
-                    review.unmatched.map((tx: ReviewTransaction) => (
-                      <UnmatchedRow
-                        key={tx.id}
-                        tx={tx}
-                        allTenants={review.all_tenants}
-                        selected={pendingMatches[tx.id] || ''}
-                        onSelect={tenantId => handleSelectTenant(tx.id, tenantId)}
-                      />
-                    ))
-                  )}
-                </div>
-              )}
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto p-6">
+                {/* ── UNMATCHED TAB ── */}
+                {activeTab === 'unmatched' && (
+                  <div className="space-y-3">
+                    {review.unmatched.length === 0 ? (
+                      <div className="text-center py-12 text-gray-400">
+                        <div className="text-4xl mb-2">✅</div>
+                        <p>כל העסקאות הותאמו!</p>
+                      </div>
+                    ) : (
+                      review.unmatched.map((tx: ReviewTransaction) => (
+                        <UnmatchedRow
+                          key={tx.id}
+                          tx={tx}
+                          allTenants={review.all_tenants}
+                          selected={pendingMatches[tx.id] || ''}
+                          onSelect={tenantId => handleSelectTenant(tx.id, tenantId)}
+                          busy={busyRow === tx.id}
+                          onApprove={() => handleApproveRow(tx.id)}
+                          onReject={() => handleRejectRow(tx.id, 'unmatched')}
+                          onDelete={() => setPendingDeleteId(tx.id)}
+                        />
+                      ))
+                    )}
+                  </div>
+                )}
 
-              {/* ── MATCHED TAB ── */}
-              {activeTab === 'matched' && (
-                <div>
-                  {review.matched.length === 0 ? (
-                    <div className="text-center py-12 text-gray-400">
-                      <div className="text-4xl mb-2">🔍</div>
-                      <p>לא נמצאו התאמות אוטומטיות</p>
-                    </div>
-                  ) : (
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-gray-500 border-b text-right">
-                          <th className="pb-2 font-medium">שם המשלם</th>
-                          <th className="pb-2 font-medium">תאריך</th>
-                          <th className="pb-2 font-medium">סכום</th>
-                          <th className="pb-2 font-medium">דייר מותאם</th>
-                          <th className="pb-2 font-medium">ביטחון</th>
-                          <th className="pb-2 font-medium">שיטה</th>
-                          <th className="pb-2 font-medium"></th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {review.matched.map((tx: ReviewTransaction) => (
-                          <tr key={tx.id} className="hover:bg-gray-50">
-                            <td className="py-2.5 pr-0 font-medium text-gray-800">
-                              {tx.payer_name || '—'}
-                            </td>
-                            <td className="py-2.5 text-gray-500">{formatDate(tx.activity_date)}</td>
-                            <td className="py-2.5 text-green-700 font-medium">
-                              {formatAmount(tx.credit_amount)}
-                            </td>
-                            <td className="py-2.5 text-gray-800">{tx.tenant_name || '—'}</td>
-                            <td className="py-2.5">
-                              <ConfidenceBadge confidence={tx.match_confidence} />
-                            </td>
-                            <td className="py-2.5 text-gray-400 text-xs">
-                              {tx.match_method ? (METHOD_LABELS[tx.match_method] || tx.match_method) : '—'}
-                            </td>
-                            <td className="py-2.5 text-left">
-                              <button
-                                onClick={() => handleReject(tx.id)}
-                                disabled={rejectingId === tx.id}
-                                title="בטל התאמה"
-                                className="text-gray-300 hover:text-red-500 transition-colors text-base leading-none disabled:opacity-40"
-                              >
-                                {rejectingId === tx.id ? '…' : '✕'}
-                              </button>
-                            </td>
+                {/* ── MATCHED TAB ── */}
+                {activeTab === 'matched' && (
+                  <div>
+                    {review.matched.length === 0 ? (
+                      <div className="text-center py-12 text-gray-400">
+                        <div className="text-4xl mb-2">🔍</div>
+                        <p>לא נמצאו התאמות אוטומטיות</p>
+                      </div>
+                    ) : (
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-gray-500 border-b text-right">
+                            <th className="pb-2 font-medium">שם המשלם</th>
+                            <th className="pb-2 font-medium">תאריך</th>
+                            <th className="pb-2 font-medium">סכום</th>
+                            <th className="pb-2 font-medium">דייר מותאם</th>
+                            <th className="pb-2 font-medium">ביטחון</th>
+                            <th className="pb-2 font-medium">שיטה</th>
+                            <th className="pb-2 font-medium text-left">פעולות</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              )}
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {review.matched.map((tx: ReviewTransaction) => (
+                            <tr key={tx.id} className="hover:bg-gray-50">
+                              <td className="py-2.5 pr-0 font-medium text-gray-800">
+                                {tx.payer_name || '—'}
+                              </td>
+                              <td className="py-2.5 text-gray-500">{formatDate(tx.activity_date)}</td>
+                              <td className="py-2.5 text-green-700 font-medium">
+                                {formatAmount(tx.credit_amount)}
+                              </td>
+                              <td className="py-2.5 text-gray-800">{tx.tenant_name || '—'}</td>
+                              <td className="py-2.5">
+                                <ConfidenceBadge confidence={tx.match_confidence} />
+                              </td>
+                              <td className="py-2.5 text-gray-400 text-xs">
+                                {tx.match_method ? (METHOD_LABELS[tx.match_method] || tx.match_method) : '—'}
+                              </td>
+                              <td className="py-2.5 text-left">
+                                <div className="flex items-center gap-1 justify-end">
+                                  <IconAction
+                                    title="בטל התאמה (חזרה ל'לא הותאמו')"
+                                    variant="reject"
+                                    onClick={() => handleRejectRow(tx.id, 'matched')}
+                                    loading={busyRow === tx.id}
+                                  >
+                                    <XIcon />
+                                  </IconAction>
+                                  <IconAction
+                                    title="מחק עסקה"
+                                    variant="delete"
+                                    onClick={() => setPendingDeleteId(tx.id)}
+                                    disabled={busyRow === tx.id}
+                                  >
+                                    <TrashIcon />
+                                  </IconAction>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )}
 
-              {/* ── IRRELEVANT TAB ── */}
-              {activeTab === 'irrelevant' && (
-                <div>
-                  {review.irrelevant.length === 0 ? (
-                    <div className="text-center py-12 text-gray-400">
-                      <div className="text-4xl mb-2">✨</div>
-                      <p>לא נמצאו עסקאות לא רלוונטיות</p>
-                    </div>
-                  ) : (
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-gray-500 border-b text-right">
-                          <th className="pb-2 font-medium">תיאור</th>
-                          <th className="pb-2 font-medium">תאריך</th>
-                          <th className="pb-2 font-medium">סכום</th>
-                          <th className="pb-2 font-medium">סוג</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {review.irrelevant.map((tx: ReviewTransaction) => (
-                          <tr key={tx.id} className="hover:bg-gray-50">
-                            <td className="py-2.5 text-gray-700 max-w-xs truncate">
-                              {tx.description}
-                            </td>
-                            <td className="py-2.5 text-gray-500">{formatDate(tx.activity_date)}</td>
-                            <td className="py-2.5 text-red-600 font-medium">
-                              {tx.debit_amount ? `-${formatAmount(tx.debit_amount)}` : formatAmount(tx.credit_amount)}
-                            </td>
-                            <td className="py-2.5">
-                              <span className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">
-                                {TYPE_LABELS[tx.transaction_type] || tx.transaction_type}
-                              </span>
-                            </td>
+                {/* ── IRRELEVANT TAB ── */}
+                {activeTab === 'irrelevant' && (
+                  <div>
+                    {review.irrelevant.length === 0 ? (
+                      <div className="text-center py-12 text-gray-400">
+                        <div className="text-4xl mb-2">✨</div>
+                        <p>לא נמצאו עסקאות לא רלוונטיות</p>
+                      </div>
+                    ) : (
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-gray-500 border-b text-right">
+                            <th className="pb-2 font-medium">תיאור</th>
+                            <th className="pb-2 font-medium">תאריך</th>
+                            <th className="pb-2 font-medium">סכום</th>
+                            <th className="pb-2 font-medium">סוג</th>
+                            <th className="pb-2 font-medium text-left">פעולות</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="border-t border-gray-200 px-6 py-4 flex items-center justify-between bg-gray-50 rounded-b-xl">
-              <div>
-                {confirmError && (
-                  <p className="text-red-600 text-sm">{confirmError}</p>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {review.irrelevant.map((tx: ReviewTransaction) => (
+                            <tr key={tx.id} className="hover:bg-gray-50">
+                              <td className="py-2.5 text-gray-700 max-w-xs truncate">
+                                {tx.description}
+                              </td>
+                              <td className="py-2.5 text-gray-500">{formatDate(tx.activity_date)}</td>
+                              <td className="py-2.5 text-red-600 font-medium">
+                                {tx.debit_amount ? `-${formatAmount(tx.debit_amount)}` : formatAmount(tx.credit_amount)}
+                              </td>
+                              <td className="py-2.5">
+                                <span className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">
+                                  {TYPE_LABELS[tx.transaction_type] || tx.transaction_type}
+                                </span>
+                              </td>
+                              <td className="py-2.5 text-left">
+                                <div className="flex items-center gap-1 justify-end">
+                                  <IconAction
+                                    title="מחק עסקה"
+                                    variant="delete"
+                                    onClick={() => setPendingDeleteId(tx.id)}
+                                    disabled={busyRow === tx.id}
+                                  >
+                                    <TrashIcon />
+                                  </IconAction>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
                 )}
               </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={onClose}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  סגור
-                </button>
-                <button
-                  onClick={handleConfirm}
-                  disabled={pendingCount === 0 || confirming}
-                  className={`px-5 py-2 text-sm font-medium text-white rounded-lg transition-colors ${
-                    pendingCount === 0 || confirming
-                      ? 'bg-blue-300 cursor-not-allowed'
-                      : 'bg-blue-600 hover:bg-blue-700'
-                  }`}
-                >
-                  {confirming
-                    ? 'שומר...'
-                    : pendingCount > 0
-                    ? `אשר התאמות ידניות (${pendingCount})`
-                    : 'אשר התאמות ידניות'}
-                </button>
+
+              {/* Footer — non-blocking. "סיום" always enabled. */}
+              <div className="border-t border-gray-200 px-6 py-4 flex items-center justify-between bg-gray-50 rounded-b-xl gap-3 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  {confirmError && (
+                    <p className="text-red-600 text-sm">{confirmError}</p>
+                  )}
+                </div>
+                <div className="flex gap-2 flex-wrap justify-end">
+                  {pendingCount > 0 && (
+                    <button
+                      onClick={handleCommitPending}
+                      disabled={bulkBusy}
+                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:bg-blue-300"
+                    >
+                      {bulkBusy ? 'שומר...' : `אשר התאמות נבחרות (${pendingCount})`}
+                    </button>
+                  )}
+                  {unconfirmedMatched.length > 0 && (
+                    <button
+                      onClick={handleApproveAllSuggestions}
+                      disabled={bulkBusy}
+                      title="סמן את כל ההתאמות האוטומטיות כמאושרות"
+                      className="px-4 py-2 text-sm font-medium text-green-700 bg-green-50 border border-green-200 hover:bg-green-100 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      אשר את כל ההצעות
+                    </button>
+                  )}
+                  <button
+                    onClick={onClose}
+                    className="px-5 py-2 text-sm font-medium text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors"
+                  >
+                    סיום
+                  </button>
+                </div>
               </div>
-            </div>
-          </>
-        )}
+            </>
+          )}
+        </div>
       </div>
-    </div>
+
+      {/* Delete confirmation */}
+      <ConfirmDialog
+        isOpen={pendingDeleteId !== null}
+        title="מחיקת עסקה"
+        message="האם למחוק את העסקה לצמיתות? לא ניתן לבטל פעולה זו."
+        confirmText="מחק"
+        cancelText="ביטול"
+        type="danger"
+        onConfirm={() => pendingDeleteId && handleDeleteRow(pendingDeleteId)}
+        onCancel={() => setPendingDeleteId(null)}
+      />
+    </>
   );
 }
 
@@ -375,12 +560,17 @@ interface UnmatchedRowProps {
   allTenants: MatchSuggestion[];
   selected: string;
   onSelect: (tenantId: string) => void;
+  busy: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+  onDelete: () => void;
 }
 
-function UnmatchedRow({ tx, allTenants, selected, onSelect }: UnmatchedRowProps) {
+function UnmatchedRow({
+  tx, allTenants, selected, onSelect, busy, onApprove, onReject, onDelete,
+}: UnmatchedRowProps) {
   const suggestions = tx.suggestions || [];
   const suggestionIds = new Set(suggestions.map(s => s.tenant_id));
-  // All tenants not already in top suggestions
   const otherTenants = allTenants
     .filter(t => !suggestionIds.has(t.tenant_id))
     .sort((a, b) => a.tenant_name.localeCompare(b.tenant_name, 'he'));
@@ -434,6 +624,35 @@ function UnmatchedRow({ tx, allTenants, selected, onSelect }: UnmatchedRowProps)
             </>
           )}
         </select>
+      </div>
+
+      {/* Per-row actions */}
+      <div className="flex items-center gap-1 flex-shrink-0">
+        <IconAction
+          title={selected ? 'אשר התאמה' : 'בחר דייר תחילה'}
+          variant="approve"
+          onClick={onApprove}
+          disabled={!selected}
+          loading={busy}
+        >
+          <CheckIcon />
+        </IconAction>
+        <IconAction
+          title="לא רלוונטי (העבר ל'לא רלוונטי')"
+          variant="reject"
+          onClick={onReject}
+          loading={busy}
+        >
+          <XIcon />
+        </IconAction>
+        <IconAction
+          title="מחק עסקה"
+          variant="delete"
+          onClick={onDelete}
+          disabled={busy}
+        >
+          <TrashIcon />
+        </IconAction>
       </div>
     </div>
   );

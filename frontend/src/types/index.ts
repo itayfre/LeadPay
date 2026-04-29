@@ -181,6 +181,7 @@ export interface ReviewTransaction {
   debit_amount?: number;
   transaction_type: string;
   // matched only:
+  tenant_id?: string;
   tenant_name?: string;
   match_confidence?: number;
   match_method?: string;
