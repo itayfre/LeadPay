@@ -50,5 +50,6 @@ class Tenant(Base):
     apartment = relationship("Apartment", back_populates="tenants")
     building = relationship("Building", back_populates="tenants")
     transactions = relationship("Transaction", back_populates="tenant")
+    allocations = relationship("TransactionAllocation", back_populates="tenant")
     name_mappings = relationship("NameMapping", back_populates="tenant")
     messages = relationship("Message", back_populates="tenant")

@@ -48,3 +48,9 @@ class Transaction(Base):
     # Relationships
     statement = relationship("BankStatement", back_populates="transactions")
     tenant = relationship("Tenant", back_populates="transactions")
+    allocations = relationship(
+        "TransactionAllocation",
+        back_populates="transaction",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )

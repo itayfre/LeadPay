@@ -3,6 +3,7 @@ from .apartment import Apartment
 from .tenant import Tenant, OwnershipType, LanguagePreference
 from .bank_statement import BankStatement
 from .transaction import Transaction, TransactionType, MatchMethod
+from .transaction_allocation import TransactionAllocation, ALLOCATION_CATEGORIES
 from .name_mapping import NameMapping, MappingCreatedBy
 from .message import Message, MessageType, DeliveryStatus
 from .user import User, UserRole, UserStatus
@@ -17,6 +18,8 @@ __all__ = [
     "Transaction",
     "TransactionType",
     "MatchMethod",
+    "TransactionAllocation",
+    "ALLOCATION_CATEGORIES",
     "NameMapping",
     "MappingCreatedBy",
     "Message",

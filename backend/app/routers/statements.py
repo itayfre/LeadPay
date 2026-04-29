@@ -7,11 +7,13 @@ import io
 from ..database import get_db
 from ..models import (
     BankStatement, Transaction, Building, Tenant,
-    Apartment, TransactionType, MatchMethod, NameMapping, MappingCreatedBy
+    Apartment, TransactionType, MatchMethod, NameMapping, MappingCreatedBy,
+    TransactionAllocation
 )
 from ..models.user import User
 from ..services.excel_parser import BankStatementParser
 from ..services.matching_engine import NameMatchingEngine
+from ..services import allocation_service
 from ..dependencies.auth import require_worker_plus, require_viewer_plus
 import logging
 import os
@@ -213,6 +215,14 @@ async def upload_bank_statement(
                     transaction.is_confirmed = True
                     matched_count += 1
                     db.add(transaction)
+                    db.flush()  # need transaction.id before creating allocation
+                    allocation_service.upsert_single_tenant_allocation(
+                        db=db,
+                        transaction=transaction,
+                        tenant_id=learned_tid,
+                        period_month=metadata.get('period_month'),
+                        period_year=metadata.get('period_year'),
+                    )
                     if trans_data['transaction_type'] == 'payment':
                         payment_transactions.append(trans_data)
                     continue  # skip fuzzy matching
@@ -237,6 +247,17 @@ async def upload_bank_statement(
                 is_auto_confirmed = confidence >= 0.9
                 transaction.is_confirmed = is_auto_confirmed
                 matched_count += 1
+
+                # Mirror the match into transaction_allocations (PR-2 invariant)
+                db.add(transaction)
+                db.flush()  # so transaction.id is populated
+                allocation_service.upsert_single_tenant_allocation(
+                    db=db,
+                    transaction=transaction,
+                    tenant_id=UUID(tenant_id),
+                    period_month=metadata.get('period_month'),
+                    period_year=metadata.get('period_year'),
+                )
 
                 # Save to NameMapping when auto-confirming a high-confidence fuzzy match
                 if is_auto_confirmed and not _is_check_or_cash(description):
@@ -360,12 +381,32 @@ def get_statement_review(
         if t.transaction_type and t.transaction_type.value != 'payment':
             irrelevant.append(base)
         elif t.matched_tenant_id:
+            # Surface allocations so PR-3's UI can render splits without a
+            # second round-trip. In PR-2 each matched transaction has at most
+            # one allocation (the PR-2 invariant), so this is usually a 1-item
+            # list — but emitting it as a list keeps the response shape stable
+            # for PR-3.
+            allocations_payload = [
+                {
+                    'id': str(a.id),
+                    'tenant_id': str(a.tenant_id) if a.tenant_id else None,
+                    'tenant_name': tenant_map.get(str(a.tenant_id), '') if a.tenant_id else None,
+                    'label': a.label,
+                    'amount': float(a.amount) if a.amount is not None else None,
+                    'period_month': a.period_month,
+                    'period_year': a.period_year,
+                    'category': a.category,
+                }
+                for a in (t.allocations or [])
+            ]
             matched.append({
                 **base,
+                'tenant_id': str(t.matched_tenant_id),
                 'tenant_name': tenant_map.get(str(t.matched_tenant_id), ''),
                 'match_confidence': t.match_confidence,
                 'match_method': t.match_method.value if t.match_method else None,
                 'is_confirmed': t.is_confirmed,
+                'allocations': allocations_payload,
             })
         # Unmatched from the current statement will be included via all_unmatched_transactions below
 
@@ -486,6 +527,14 @@ def manually_match_transaction(
     transaction.match_confidence = 1.0
     transaction.is_confirmed = True
 
+    # Keep transaction_allocations in sync — replace any existing rows with a
+    # single allocation pointing at this tenant for the full amount.
+    allocation_service.upsert_single_tenant_allocation(
+        db=db,
+        transaction=transaction,
+        tenant_id=tenant_id,
+    )
+
     # If remember is True, create a name mapping for future use
     if remember:
         # Use stored payer_name (correctly extracted at upload time for all formats)
@@ -549,9 +598,65 @@ def unmatch_transaction(
     transaction.match_confidence = None
     transaction.match_method = None
     transaction.is_confirmed = False
+    # Drop any allocations attached to this transaction
+    allocation_service.clear_for_transaction(db, transaction.id)
 
     db.commit()
     return {"ok": True, "transaction_id": str(transaction_id)}
+
+
+@router.post("/transactions/{transaction_id}/ignore")
+def ignore_transaction(
+    transaction_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
+):
+    """
+    Mark a transaction as irrelevant (e.g., a fee or a non-tenant deposit).
+    Clears any existing match and flips transaction_type to OTHER so it falls
+    into the 'irrelevant' bucket of the review UI.
+    """
+    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
+    if not transaction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Transaction with id {transaction_id} not found"
+        )
+
+    transaction.matched_tenant_id = None
+    transaction.match_confidence = None
+    transaction.match_method = None
+    transaction.is_confirmed = False
+    transaction.transaction_type = TransactionType.OTHER
+    # Drop allocations — an "ignored" transaction allocates to nothing
+    allocation_service.clear_for_transaction(db, transaction.id)
+
+    db.commit()
+    return {"ok": True, "transaction_id": str(transaction_id)}
+
+
+@router.delete("/transactions/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_transaction(
+    transaction_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
+):
+    """
+    Hard-delete a transaction from the building.
+    Used by the review UI when the user wants to remove an entry entirely
+    (e.g., the bank exported a duplicate or a clearly-erroneous row).
+    Returns 204 No Content — frontend must not parse a JSON body.
+    """
+    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
+    if not transaction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Transaction with id {transaction_id} not found"
+        )
+
+    db.delete(transaction)
+    db.commit()
+    return None
 
 
 @router.get("/{building_id}/statements")
