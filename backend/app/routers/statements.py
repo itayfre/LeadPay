@@ -8,12 +8,15 @@ from ..database import get_db
 from ..models import (
     BankStatement, Transaction, Building, Tenant,
     Apartment, TransactionType, MatchMethod, NameMapping, MappingCreatedBy,
-    TransactionAllocation
+    TransactionAllocation, VendorMapping,
 )
 from ..models.user import User
+from ..schemas.allocation import SetAllocationsRequest, AllocationResponse
+from ..schemas.expense import CategorizeRequest, VendorMappingResponse
 from ..services.excel_parser import BankStatementParser
 from ..services.matching_engine import NameMatchingEngine
 from ..services import allocation_service
+from ..services import vendor_classifier as vc
 from ..dependencies.auth import require_worker_plus, require_viewer_plus
 import logging
 import os
@@ -37,6 +40,18 @@ def _is_check_or_cash(description: str) -> bool:
 router = APIRouter(
     prefix="/api/v1/statements",
     tags=["bank statements"]
+)
+
+# Sub-router for transaction-level operations (categorize)
+transactions_router = APIRouter(
+    prefix="/api/v1/transactions",
+    tags=["transactions"],
+)
+
+# Sub-router for vendor-mapping management
+vendor_mappings_router = APIRouter(
+    prefix="/api/v1",
+    tags=["vendor mappings"],
 )
 
 
@@ -138,10 +153,17 @@ async def upload_bank_statement(
     ).all()
     learned_map = {nm.bank_name.strip().lower(): nm.tenant_id for nm in name_mappings}
 
+    # Load VendorMappings for expense classification
+    building_vendor_mappings = db.query(VendorMapping).filter(
+        VendorMapping.building_id == building_id
+    ).all()
+
     # Create transaction records
     matched_count = 0
     unmatched_count = 0
     skipped_count = 0
+    expense_classified = 0
+    expense_unclassified = 0
     payment_transactions = []
 
     for trans_data in transactions_data:
@@ -277,6 +299,31 @@ async def upload_bank_statement(
             else:
                 unmatched_count += 1
 
+        # Expense classification: outgoing transfers (debit rows)
+        elif (
+            trans_data['transaction_type'] == 'transfer'
+            and trans_data.get('debit_amount')
+        ):
+            from decimal import Decimal as _D
+            description = trans_data.get('description', '')
+            result = vc.classify(description, building_vendor_mappings)
+            if result:
+                db.add(transaction)
+                db.flush()
+                db.add(TransactionAllocation(
+                    transaction_id=transaction.id,
+                    tenant_id=None,
+                    label=result['vendor_label'],
+                    category=result['category'],
+                    amount=_D(str(abs(trans_data['debit_amount']))),
+                    period_month=metadata.get('period_month'),
+                    period_year=metadata.get('period_year'),
+                ))
+                expense_classified += 1
+                continue  # already added above
+            else:
+                expense_unclassified += 1
+
         db.add(transaction)
 
         if trans_data['transaction_type'] == 'payment':
@@ -302,6 +349,8 @@ async def upload_bank_statement(
         "matched": matched_count,
         "unmatched": unmatched_count,
         "skipped_duplicates": skipped_count,
+        "expense_classified": expense_classified,
+        "expense_unclassified": expense_unclassified,
         "match_rate": f"{(matched_count / len(payment_transactions) * 100):.1f}%" if payment_transactions else "N/A"
     }
 
@@ -329,7 +378,7 @@ def get_statement_review(
         Transaction.statement_id == statement_id
     ).order_by(Transaction.activity_date).all()
 
-    # Load ALL unmatched payment transactions for the building (across all statements).
+    # Load ALL unmatched payment/credit-transfer transactions for the building (across all statements).
     # This ensures previously uploaded but unmatched transactions are always surfaced.
     all_unmatched_transactions = (
         db.query(Transaction)
@@ -337,7 +386,9 @@ def get_statement_review(
         .filter(
             BankStatement.building_id == statement.building_id,
             Transaction.matched_tenant_id == None,
-            Transaction.transaction_type == TransactionType.PAYMENT,
+            Transaction.transaction_type.in_([TransactionType.PAYMENT, TransactionType.TRANSFER]),
+            # Only credit-side transfers belong in unmatched; debit transfers go to expenses
+            ~((Transaction.transaction_type == TransactionType.TRANSFER) & (Transaction.debit_amount != None)),
         )
         .order_by(Transaction.activity_date)
         .all()
@@ -362,8 +413,9 @@ def get_statement_review(
     matched = []
     unmatched = []
     irrelevant = []
+    expenses = []
 
-    # Process current statement for matched + irrelevant
+    # Process current statement for matched / expenses / irrelevant
     for t in statement_transactions:
         # Prefer stored payer_name (correctly extracted during upload for all formats)
         # Fall back to on-the-fly extraction from description for older transactions
@@ -377,6 +429,20 @@ def get_statement_review(
             'debit_amount': float(t.debit_amount) if t.debit_amount else None,
             'transaction_type': t.transaction_type.value if t.transaction_type else 'other',
         }
+
+        if t.transaction_type == TransactionType.TRANSFER and t.debit_amount:
+            # Outgoing transfer → expense row
+            expense_alloc = next(
+                (a for a in (t.allocations or []) if a.tenant_id is None and a.category),
+                None,
+            )
+            expenses.append({
+                **base,
+                'vendor_label': expense_alloc.label if expense_alloc else None,
+                'category': expense_alloc.category if expense_alloc else None,
+                'allocation_id': str(expense_alloc.id) if expense_alloc else None,
+            })
+            continue
 
         if t.transaction_type and t.transaction_type.value != 'payment':
             irrelevant.append(base)
@@ -446,6 +512,7 @@ def get_statement_review(
         'matched': matched,
         'unmatched': unmatched,
         'irrelevant': irrelevant,
+        'expenses': expenses,
         'all_tenants': all_tenants,
     }
 
@@ -498,6 +565,61 @@ def get_statement_transactions(
     }
 
 
+@router.post("/transactions/{transaction_id}/allocations", response_model=List[AllocationResponse])
+def set_transaction_allocations(
+    transaction_id: UUID,
+    payload: SetAllocationsRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
+):
+    """Replace all allocations for a transaction with the given list.
+
+    Accepts splits (multiple tenants), multi-month (one tenant, multiple
+    period rows), and non-tenant income (label only). Sum must equal the
+    transaction's headline amount within 0.01.
+
+    Sets matched_tenant_id only when the result is a single full-amount
+    tenant allocation; NULL otherwise.
+    """
+    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
+    if not transaction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Transaction with id {transaction_id} not found"
+        )
+
+    try:
+        created = allocation_service.set_split_allocations(
+            db=db,
+            transaction=transaction,
+            allocations=[a.model_dump() for a in payload.allocations],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    transaction.match_method = MatchMethod.MANUAL
+    transaction.match_confidence = 1.0
+    transaction.is_confirmed = True
+
+    db.commit()
+
+    return [
+        AllocationResponse(
+            id=str(a.id),
+            transaction_id=str(a.transaction_id),
+            tenant_id=str(a.tenant_id) if a.tenant_id else None,
+            label=a.label,
+            amount=float(a.amount),
+            period_month=a.period_month,
+            period_year=a.period_year,
+            category=a.category,
+            notes=a.notes,
+            created_at=a.created_at.isoformat(),
+        )
+        for a in created
+    ]
+
+
 @router.post("/transactions/{transaction_id}/match/{tenant_id}")
 def manually_match_transaction(
     transaction_id: UUID,
@@ -506,7 +628,7 @@ def manually_match_transaction(
     db: Session = Depends(get_db),
     _: User = Depends(require_worker_plus),
 ):
-    """Manually match a transaction to a tenant"""
+    """Manually match a transaction to a single tenant (thin wrapper over set_transaction_allocations)."""
     transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
     if not transaction:
         raise HTTPException(
@@ -521,51 +643,48 @@ def manually_match_transaction(
             detail=f"Tenant with id {tenant_id} not found"
         )
 
-    # Update transaction
-    transaction.matched_tenant_id = tenant_id
+    from decimal import Decimal as _D
+    headline = (
+        _D(str(transaction.credit_amount))
+        if transaction.credit_amount is not None
+        else _D(str(transaction.debit_amount or 0))
+    )
+    try:
+        allocation_service.set_split_allocations(
+            db=db,
+            transaction=transaction,
+            allocations=[{"tenant_id": tenant_id, "amount": headline}],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
     transaction.match_method = MatchMethod.MANUAL
     transaction.match_confidence = 1.0
     transaction.is_confirmed = True
 
-    # Keep transaction_allocations in sync — replace any existing rows with a
-    # single allocation pointing at this tenant for the full amount.
-    allocation_service.upsert_single_tenant_allocation(
-        db=db,
-        transaction=transaction,
-        tenant_id=tenant_id,
-    )
-
-    # If remember is True, create a name mapping for future use
     if remember:
-        # Use stored payer_name (correctly extracted at upload time for all formats)
-        # Fall back to on-the-fly extraction for older transactions without stored payer_name
         parser = BankStatementParser()
         payer_name = transaction.payer_name or parser._extract_payer_name(transaction.description)
 
         if payer_name and not _is_check_or_cash(transaction.description):
-            # Get building_id from statement
             statement = db.query(BankStatement).filter(
                 BankStatement.id == transaction.statement_id
             ).first()
 
             if statement:
-                # Check if mapping already exists for this payer (regardless of tenant)
-                # Update if tenant changed, otherwise skip
                 existing_mapping = db.query(NameMapping).filter(
                     NameMapping.building_id == statement.building_id,
                     NameMapping.bank_name == payer_name,
                 ).first()
 
                 if not existing_mapping:
-                    name_mapping = NameMapping(
+                    db.add(NameMapping(
                         building_id=statement.building_id,
                         bank_name=payer_name,
                         tenant_id=tenant_id,
-                        created_by=MappingCreatedBy.MANUAL
-                    )
-                    db.add(name_mapping)
+                        created_by=MappingCreatedBy.MANUAL,
+                    ))
                 elif existing_mapping.tenant_id != tenant_id:
-                    # Update to new tenant if the mapping changed
                     existing_mapping.tenant_id = tenant_id
                     existing_mapping.created_by = MappingCreatedBy.MANUAL
 
@@ -576,7 +695,7 @@ def manually_match_transaction(
         "message": "Transaction matched successfully",
         "transaction_id": str(transaction.id),
         "tenant_id": str(tenant_id),
-        "remember": remember
+        "remember": remember,
     }
 
 
@@ -691,3 +810,162 @@ def list_building_statements(
             for s in statements
         ]
     }
+
+
+# ── Categorize endpoints ──────────────────────────────────────────────────────
+
+@transactions_router.post("/{transaction_id}/categorize")
+def categorize_transaction(
+    transaction_id: UUID,
+    body: CategorizeRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
+):
+    """
+    Manually classify a debit transaction as an expense.
+    Creates or replaces the expense allocation.
+    If body.remember=True, upserts a VendorMapping so future uploads auto-classify.
+    """
+    from decimal import Decimal
+
+    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if not transaction.debit_amount:
+        raise HTTPException(status_code=400, detail="Transaction is not a debit row")
+
+    # Validate category
+    from ..models.transaction_allocation import ALLOCATION_CATEGORIES
+    if body.category not in ALLOCATION_CATEGORIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Must be one of: {', '.join(ALLOCATION_CATEGORIES)}",
+        )
+
+    # Remove any existing expense allocation for this transaction
+    existing = db.query(TransactionAllocation).filter(
+        TransactionAllocation.transaction_id == transaction_id,
+        TransactionAllocation.tenant_id == None,
+    ).first()
+    if existing:
+        db.delete(existing)
+        db.flush()
+
+    # Get period from the parent bank statement
+    statement = db.query(BankStatement).filter(
+        BankStatement.id == transaction.statement_id
+    ).first()
+
+    alloc = TransactionAllocation(
+        transaction_id=transaction_id,
+        tenant_id=None,
+        label=body.vendor_label,
+        category=body.category,
+        amount=Decimal(str(abs(transaction.debit_amount))),
+        period_month=statement.period_month if statement else None,
+        period_year=statement.period_year if statement else None,
+    )
+    db.add(alloc)
+
+    # Upsert VendorMapping if remember=True
+    if body.remember:
+        # Need building_id via statement
+        if statement:
+            keyword = body.vendor_label.strip().lower()
+            existing_mapping = db.query(VendorMapping).filter(
+                VendorMapping.building_id == statement.building_id,
+                VendorMapping.keyword == keyword,
+            ).first()
+            if existing_mapping:
+                existing_mapping.vendor_label = body.vendor_label
+                existing_mapping.category = body.category
+                existing_mapping.created_by = MappingCreatedBy.MANUAL
+            else:
+                db.add(VendorMapping(
+                    building_id=statement.building_id,
+                    keyword=keyword,
+                    vendor_label=body.vendor_label,
+                    category=body.category,
+                    created_by=MappingCreatedBy.MANUAL,
+                ))
+
+    db.commit()
+    db.refresh(alloc)
+
+    return {
+        "allocation_id": str(alloc.id),
+        "vendor_label": alloc.label,
+        "category": alloc.category,
+        "amount": float(alloc.amount),
+    }
+
+
+@transactions_router.delete("/{transaction_id}/categorize", status_code=status.HTTP_204_NO_CONTENT)
+def uncategorize_transaction(
+    transaction_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
+):
+    """
+    Remove the expense allocation from a debit transaction,
+    returning it to the uncategorized expenses group.
+    """
+    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    alloc = db.query(TransactionAllocation).filter(
+        TransactionAllocation.transaction_id == transaction_id,
+        TransactionAllocation.tenant_id == None,
+    ).first()
+    if alloc:
+        db.delete(alloc)
+        db.commit()
+
+
+# ── Vendor mapping management ─────────────────────────────────────────────────
+
+@vendor_mappings_router.get("/buildings/{building_id}/vendor-mappings/")
+def list_vendor_mappings(
+    building_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
+):
+    """List all user-defined vendor classification rules for a building."""
+    building = db.query(Building).filter(Building.id == building_id).first()
+    if not building:
+        raise HTTPException(status_code=404, detail="Building not found")
+
+    mappings = db.query(VendorMapping).filter(
+        VendorMapping.building_id == building_id
+    ).order_by(VendorMapping.created_at.desc()).all()
+
+    return {
+        "building_id": str(building_id),
+        "count": len(mappings),
+        "mappings": [
+            {
+                "id": str(m.id),
+                "keyword": m.keyword,
+                "vendor_label": m.vendor_label,
+                "category": m.category,
+                "created_by": m.created_by.value,
+                "created_at": m.created_at.isoformat(),
+            }
+            for m in mappings
+        ],
+    }
+
+
+@vendor_mappings_router.delete("/vendor-mappings/{mapping_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_vendor_mapping(
+    mapping_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
+):
+    """Remove a learned vendor classification rule."""
+    mapping = db.query(VendorMapping).filter(VendorMapping.id == mapping_id).first()
+    if not mapping:
+        raise HTTPException(status_code=404, detail="Vendor mapping not found")
+    db.delete(mapping)
+    db.commit()

@@ -25,4 +25,5 @@ class Building(Base):
     tenants = relationship("Tenant", back_populates="building", cascade="save-update, merge")
     bank_statements = relationship("BankStatement", back_populates="building", cascade="all, delete-orphan")
     name_mappings = relationship("NameMapping", back_populates="building", cascade="all, delete-orphan")
+    vendor_mappings = relationship("VendorMapping", back_populates="building", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="building", cascade="all, delete-orphan")
