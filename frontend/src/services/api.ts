@@ -1,4 +1,4 @@
-import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, BankStatement, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview } from '../types';
+import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, BankStatement, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview, Allocation, SetAllocationsRequest } from '../types';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -184,6 +184,27 @@ export const statementsAPI = {
   deleteTransaction: (transactionId: string) =>
     fetchAPI<void>(
       `/api/v1/statements/transactions/${transactionId}`,
+      { method: 'DELETE' }
+    ),
+
+  setAllocations: (transactionId: string, payload: SetAllocationsRequest) =>
+    fetchAPI<Allocation[]>(
+      `/api/v1/statements/transactions/${transactionId}/allocations`,
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+
+  categorizeTransaction: (
+    transactionId: string,
+    payload: { vendor_label: string; category: string; remember: boolean }
+  ) =>
+    fetchAPI<{ allocation_id: string; vendor_label: string; category: string; amount: number }>(
+      `/api/v1/transactions/${transactionId}/categorize`,
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+
+  uncategorizeTransaction: (transactionId: string) =>
+    fetchAPI<void>(
+      `/api/v1/transactions/${transactionId}/categorize`,
       { method: 'DELETE' }
     ),
 };

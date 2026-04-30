@@ -186,8 +186,21 @@ export interface ReviewTransaction {
   match_confidence?: number;
   match_method?: string;
   is_confirmed?: boolean;
+  allocations?: Allocation[];
   // unmatched only:
   suggestions?: MatchSuggestion[];
+}
+
+export interface ExpenseRow {
+  id: string;
+  activity_date: string;
+  description: string;
+  debit_amount?: number;
+  transaction_type: string;
+  // classifier output (null if uncategorized)
+  vendor_label: string | null;
+  category: string | null;
+  allocation_id: string | null;
 }
 
 export interface StatementReview {
@@ -196,5 +209,35 @@ export interface StatementReview {
   matched: ReviewTransaction[];
   unmatched: ReviewTransaction[];
   irrelevant: ReviewTransaction[];
+  expenses: ExpenseRow[];
   all_tenants: MatchSuggestion[];
 }
+
+// --- Allocation types (PR-3) ---
+
+export interface Allocation {
+  id: string;
+  transaction_id: string;
+  tenant_id?: string;
+  label?: string;
+  amount: number;
+  period_month?: number;
+  period_year?: number;
+  category?: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface AllocationItem {
+  tenant_id?: string;
+  label?: string;
+  amount: number;
+  period_month?: number;
+  period_year?: number;
+}
+
+export interface SetAllocationsRequest {
+  allocations: AllocationItem[];
+}
+
+export type AllocationMode = 'split' | 'multi_month' | 'non_tenant';

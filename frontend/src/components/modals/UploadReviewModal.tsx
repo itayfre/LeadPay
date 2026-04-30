@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { statementsAPI } from '../../services/api';
-import type { StatementReview, ReviewTransaction, MatchSuggestion } from '../../types';
+import type { StatementReview, ReviewTransaction, MatchSuggestion, ExpenseRow } from '../../types';
 import ConfirmDialog from './ConfirmDialog';
+import AllocationDrawer from './AllocationDrawer';
 
 interface Props {
   statementId: string;
@@ -10,7 +11,21 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = 'unmatched' | 'matched' | 'irrelevant';
+type Tab = 'unmatched' | 'matched' | 'irrelevant' | 'expenses';
+
+const CATEGORY_LABELS: Record<string, string> = {
+  routine_maintenance: 'אחזקה שוטפת',
+  technical_maintenance: 'אחזקה טכנית',
+  administrative: 'הוצאות הנהלה',
+  extraordinary: 'תיקונים מיוחדים',
+};
+
+const CATEGORY_OPTIONS = [
+  { value: 'routine_maintenance', label: 'אחזקה שוטפת' },
+  { value: 'technical_maintenance', label: 'אחזקה טכנית' },
+  { value: 'administrative', label: 'הוצאות הנהלה' },
+  { value: 'extraordinary', label: 'תיקונים מיוחדים' },
+];
 
 const METHOD_LABELS: Record<string, string> = {
   exact: 'התאמה מדויקת',
@@ -72,13 +87,23 @@ function TrashIcon({ className = 'w-4 h-4' }: { className?: string }) {
   );
 }
 
+function GearIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+  );
+}
+
 // Generic round icon button used for all per-row actions
 interface IconActionProps {
   title: string;
   onClick: () => void;
   disabled?: boolean;
   loading?: boolean;
-  variant: 'approve' | 'reject' | 'delete';
+  variant: 'approve' | 'reject' | 'delete' | 'settings';
   children: React.ReactNode;
 }
 
@@ -87,6 +112,7 @@ function IconAction({ title, onClick, disabled, loading, variant, children }: Ic
     approve: 'text-gray-400 hover:text-green-600 hover:bg-green-50',
     reject: 'text-gray-400 hover:text-yellow-600 hover:bg-yellow-50',
     delete: 'text-gray-400 hover:text-red-600 hover:bg-red-50',
+    settings: 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50',
   }[variant];
 
   return (
@@ -121,6 +147,17 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
 
   // Confirm dialog state for delete
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  // Allocation drawer state — which transaction is open
+  const [drawerTx, setDrawerTx] = useState<ReviewTransaction | null>(null);
+
+  // Expense edit popover state
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [expenseEditForm, setExpenseEditForm] = useState<{
+    vendor_label: string;
+    category: string;
+    remember: boolean;
+  }>({ vendor_label: '', category: 'routine_maintenance', remember: false });
 
   const refreshReview = async () => {
     const updated = await statementsAPI.getReview(statementId);
@@ -267,11 +304,48 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
     }
   };
 
+  const openExpenseEdit = (row: ExpenseRow) => {
+    setEditingExpenseId(row.id);
+    setExpenseEditForm({
+      vendor_label: row.vendor_label ?? '',
+      category: row.category ?? 'routine_maintenance',
+      remember: false,
+    });
+  };
+
+  const handleSaveExpense = async (txId: string) => {
+    setBusyRow(txId);
+    setConfirmError(null);
+    try {
+      await statementsAPI.categorizeTransaction(txId, expenseEditForm);
+      setEditingExpenseId(null);
+      await refreshReview();
+    } catch (err) {
+      setConfirmError((err as Error).message);
+    } finally {
+      setBusyRow(null);
+    }
+  };
+
+  const handleUncategorize = async (txId: string) => {
+    setBusyRow(txId);
+    setConfirmError(null);
+    try {
+      await statementsAPI.uncategorizeTransaction(txId);
+      await refreshReview();
+    } catch (err) {
+      setConfirmError((err as Error).message);
+    } finally {
+      setBusyRow(null);
+    }
+  };
+
   const tabs: { id: Tab; label: string; count: number }[] = review
     ? [
         { id: 'unmatched', label: 'לא הותאמו', count: review.unmatched.length },
         { id: 'matched', label: 'הותאמו אוטומטית', count: review.matched.length },
         { id: 'irrelevant', label: 'לא רלוונטי', count: review.irrelevant.length },
+        { id: 'expenses', label: 'הוצאות מזוהות', count: review.expenses?.length ?? 0 },
       ]
     : [];
 
@@ -340,6 +414,8 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
                           ? 'bg-red-100 text-red-700'
                           : tab.id === 'matched'
                           ? 'bg-green-100 text-green-700'
+                          : tab.id === 'expenses' && tab.count > 0
+                          ? 'bg-orange-100 text-orange-700'
                           : 'bg-gray-100 text-gray-600'
                       }`}
                     >
@@ -371,6 +447,7 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
                           onApprove={() => handleApproveRow(tx.id)}
                           onReject={() => handleRejectRow(tx.id, 'unmatched')}
                           onDelete={() => setPendingDeleteId(tx.id)}
+                          onOpenDrawer={() => setDrawerTx(tx)}
                         />
                       ))
                     )}
@@ -417,6 +494,14 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
                               </td>
                               <td className="py-2.5 text-left">
                                 <div className="flex items-center gap-1 justify-end">
+                                  <IconAction
+                                    title="הגדרת הקצאה"
+                                    variant="settings"
+                                    onClick={() => setDrawerTx(tx)}
+                                    disabled={busyRow === tx.id}
+                                  >
+                                    <GearIcon />
+                                  </IconAction>
                                   <IconAction
                                     title="בטל התאמה (חזרה ל'לא הותאמו')"
                                     variant="reject"
@@ -496,6 +581,244 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
                     )}
                   </div>
                 )}
+                {/* ── EXPENSES TAB ── */}
+                {activeTab === 'expenses' && (
+                  <div>
+                    {(review.expenses?.length ?? 0) === 0 ? (
+                      <div className="text-center py-12 text-gray-400">
+                        <div className="text-4xl mb-2">💸</div>
+                        <p>לא זוהו הוצאות בדוח זה</p>
+                      </div>
+                    ) : (() => {
+                      const uncategorized = (review.expenses ?? []).filter(e => !e.category);
+                      const categorized = (review.expenses ?? []).filter(e => !!e.category);
+                      return (
+                        <div className="space-y-4">
+                          {/* Uncategorized rows */}
+                          {uncategorized.length > 0 && (
+                            <div>
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-xs font-semibold text-yellow-700 bg-yellow-100 border border-yellow-200 px-2 py-0.5 rounded-full">
+                                  ⚠ ללא קטגוריה ({uncategorized.length})
+                                </span>
+                              </div>
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="text-gray-500 border-b text-right">
+                                    <th className="pb-2 font-medium">תאריך</th>
+                                    <th className="pb-2 font-medium">תיאור</th>
+                                    <th className="pb-2 font-medium">סכום</th>
+                                    <th className="pb-2 font-medium text-left">פעולה</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-yellow-100">
+                                  {uncategorized.map((row: ExpenseRow) => (
+                                    <React.Fragment key={row.id}>
+                                    <tr className="bg-yellow-50 hover:bg-yellow-100">
+                                      <td className="py-2.5 text-gray-500">{formatDate(row.activity_date)}</td>
+                                      <td className="py-2.5 text-gray-700 max-w-xs truncate" title={row.description}>
+                                        {row.description}
+                                      </td>
+                                      <td className="py-2.5 text-red-600 font-medium">
+                                        -{formatAmount(row.debit_amount)}
+                                      </td>
+                                      <td className="py-2.5 text-left">
+                                        <IconAction
+                                          title="קטגר הוצאה"
+                                          variant="settings"
+                                          onClick={() => openExpenseEdit(row)}
+                                          disabled={busyRow === row.id}
+                                        >
+                                          <GearIcon />
+                                        </IconAction>
+                                      </td>
+                                    </tr>
+                                    {editingExpenseId === row.id && (
+                                      <tr key={`${row.id}-edit`} className="bg-yellow-50">
+                                        <td colSpan={4} className="pb-3 px-2">
+                                          <div className="bg-white border border-gray-200 rounded-lg shadow-md p-4">
+                                            <p className="text-sm font-semibold text-gray-700 mb-3">✏ קטגור הוצאה</p>
+                                            <div className="space-y-2">
+                                              <div>
+                                                <label className="text-xs text-gray-500 block mb-1">שם ספק</label>
+                                                <input
+                                                  type="text"
+                                                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                                  value={expenseEditForm.vendor_label}
+                                                  onChange={e => setExpenseEditForm(f => ({ ...f, vendor_label: e.target.value }))}
+                                                  placeholder="לדוגמה: חברת החשמל"
+                                                />
+                                              </div>
+                                              <div>
+                                                <label className="text-xs text-gray-500 block mb-1">קטגוריה</label>
+                                                <select
+                                                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                                  value={expenseEditForm.category}
+                                                  onChange={e => setExpenseEditForm(f => ({ ...f, category: e.target.value }))}
+                                                >
+                                                  {CATEGORY_OPTIONS.map(o => (
+                                                    <option key={o.value} value={o.value}>{o.label}</option>
+                                                  ))}
+                                                </select>
+                                              </div>
+                                              <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={expenseEditForm.remember}
+                                                  onChange={e => setExpenseEditForm(f => ({ ...f, remember: e.target.checked }))}
+                                                  className="rounded"
+                                                />
+                                                זכור עבור הבא
+                                              </label>
+                                            </div>
+                                            <div className="flex gap-2 mt-3 justify-end">
+                                              <button
+                                                onClick={() => setEditingExpenseId(null)}
+                                                className="px-3 py-1.5 text-xs text-gray-600 border border-gray-200 rounded hover:bg-gray-50"
+                                              >
+                                                ביטול
+                                              </button>
+                                              <button
+                                                onClick={() => handleSaveExpense(row.id)}
+                                                disabled={busyRow === row.id || !expenseEditForm.vendor_label}
+                                                className="px-3 py-1.5 text-xs text-white bg-indigo-600 hover:bg-indigo-700 rounded disabled:opacity-50"
+                                              >
+                                                {busyRow === row.id ? '...' : 'שמור'}
+                                              </button>
+                                            </div>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    )}
+                                    </React.Fragment>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {/* Categorized rows */}
+                          {categorized.length > 0 && (
+                            <div>
+                              {uncategorized.length > 0 && (
+                                <div className="border-t border-gray-200 mt-4 mb-3" />
+                              )}
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="text-gray-500 border-b text-right">
+                                    <th className="pb-2 font-medium">תאריך</th>
+                                    <th className="pb-2 font-medium">תיאור</th>
+                                    <th className="pb-2 font-medium">ספק</th>
+                                    <th className="pb-2 font-medium">קטגוריה</th>
+                                    <th className="pb-2 font-medium">סכום</th>
+                                    <th className="pb-2 font-medium text-left">פעולות</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                  {categorized.map((row: ExpenseRow) => (
+                                    <tr key={row.id} className="hover:bg-gray-50 relative">
+                                      <td className="py-2.5 text-gray-500">{formatDate(row.activity_date)}</td>
+                                      <td className="py-2.5 text-gray-700 max-w-[180px] truncate" title={row.description}>
+                                        {row.description}
+                                      </td>
+                                      <td className="py-2.5 text-gray-800 font-medium">
+                                        {row.vendor_label ?? '—'}
+                                      </td>
+                                      <td className="py-2.5">
+                                        <span className="bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full font-medium">
+                                          {CATEGORY_LABELS[row.category ?? ''] ?? row.category}
+                                        </span>
+                                      </td>
+                                      <td className="py-2.5 text-red-600 font-medium">
+                                        -{formatAmount(row.debit_amount)}
+                                      </td>
+                                      <td className="py-2.5 text-left">
+                                        <div className="flex items-center gap-1 justify-end">
+                                          <IconAction
+                                            title="ערוך קטגוריה"
+                                            variant="settings"
+                                            onClick={() => openExpenseEdit(row)}
+                                            disabled={busyRow === row.id}
+                                          >
+                                            <GearIcon />
+                                          </IconAction>
+                                          <IconAction
+                                            title="הסר קטגוריה"
+                                            variant="delete"
+                                            onClick={() => handleUncategorize(row.id)}
+                                            loading={busyRow === row.id}
+                                          >
+                                            <TrashIcon />
+                                          </IconAction>
+                                        </div>
+                                      </td>
+
+                                      {/* Inline edit popover */}
+                                      {editingExpenseId === row.id && (
+                                        <td colSpan={6} className="p-0">
+                                          <div className="absolute left-0 right-0 z-20 bg-white border border-gray-200 rounded-lg shadow-xl p-4 mt-1 mx-2">
+                                            <p className="text-sm font-semibold text-gray-700 mb-3">✏ עריכת ספק</p>
+                                            <div className="space-y-2">
+                                              <div>
+                                                <label className="text-xs text-gray-500 block mb-1">שם ספק</label>
+                                                <input
+                                                  type="text"
+                                                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                                  value={expenseEditForm.vendor_label}
+                                                  onChange={e => setExpenseEditForm(f => ({ ...f, vendor_label: e.target.value }))}
+                                                />
+                                              </div>
+                                              <div>
+                                                <label className="text-xs text-gray-500 block mb-1">קטגוריה</label>
+                                                <select
+                                                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                                  value={expenseEditForm.category}
+                                                  onChange={e => setExpenseEditForm(f => ({ ...f, category: e.target.value }))}
+                                                >
+                                                  {CATEGORY_OPTIONS.map(o => (
+                                                    <option key={o.value} value={o.value}>{o.label}</option>
+                                                  ))}
+                                                </select>
+                                              </div>
+                                              <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={expenseEditForm.remember}
+                                                  onChange={e => setExpenseEditForm(f => ({ ...f, remember: e.target.checked }))}
+                                                  className="rounded"
+                                                />
+                                                זכור עבור הבא
+                                              </label>
+                                            </div>
+                                            <div className="flex gap-2 mt-3 justify-end">
+                                              <button
+                                                onClick={() => setEditingExpenseId(null)}
+                                                className="px-3 py-1.5 text-xs text-gray-600 border border-gray-200 rounded hover:bg-gray-50"
+                                              >
+                                                ביטול
+                                              </button>
+                                              <button
+                                                onClick={() => handleSaveExpense(row.id)}
+                                                disabled={busyRow === row.id || !expenseEditForm.vendor_label}
+                                                className="px-3 py-1.5 text-xs text-white bg-indigo-600 hover:bg-indigo-700 rounded disabled:opacity-50"
+                                              >
+                                                {busyRow === row.id ? '...' : 'שמור'}
+                                              </button>
+                                            </div>
+                                          </div>
+                                        </td>
+                                      )}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
 
               {/* Footer — non-blocking. "סיום" always enabled. */}
@@ -549,6 +872,19 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
         onConfirm={() => pendingDeleteId && handleDeleteRow(pendingDeleteId)}
         onCancel={() => setPendingDeleteId(null)}
       />
+
+      {/* Allocation drawer */}
+      {drawerTx && review && (
+        <AllocationDrawer
+          tx={drawerTx}
+          allTenants={review.all_tenants}
+          onClose={() => setDrawerTx(null)}
+          onSaved={async () => {
+            setDrawerTx(null);
+            await refreshReview();
+          }}
+        />
+      )}
     </>
   );
 }
@@ -564,10 +900,11 @@ interface UnmatchedRowProps {
   onApprove: () => void;
   onReject: () => void;
   onDelete: () => void;
+  onOpenDrawer: () => void;
 }
 
 function UnmatchedRow({
-  tx, allTenants, selected, onSelect, busy, onApprove, onReject, onDelete,
+  tx, allTenants, selected, onSelect, busy, onApprove, onReject, onDelete, onOpenDrawer,
 }: UnmatchedRowProps) {
   const suggestions = tx.suggestions || [];
   const suggestionIds = new Set(suggestions.map(s => s.tenant_id));
@@ -636,6 +973,14 @@ function UnmatchedRow({
           loading={busy}
         >
           <CheckIcon />
+        </IconAction>
+        <IconAction
+          title="הגדרת הקצאה"
+          variant="settings"
+          onClick={onOpenDrawer}
+          disabled={busy}
+        >
+          <GearIcon />
         </IconAction>
         <IconAction
           title="לא רלוונטי (העבר ל'לא רלוונטי')"
