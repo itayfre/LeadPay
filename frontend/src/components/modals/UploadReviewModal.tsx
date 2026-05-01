@@ -97,6 +97,14 @@ function GearIcon({ className = 'w-4 h-4' }: { className?: string }) {
   );
 }
 
+function ChevronDownIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+    </svg>
+  );
+}
+
 // Generic round icon button used for all per-row actions
 interface IconActionProps {
   title: string;
@@ -428,31 +436,89 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
               {/* Body */}
               <div className="flex-1 overflow-y-auto p-6">
                 {/* ── UNMATCHED TAB ── */}
-                {activeTab === 'unmatched' && (
-                  <div className="space-y-3">
-                    {review.unmatched.length === 0 ? (
+                {activeTab === 'unmatched' && (() => {
+                  // Rows explicitly marked as NOT from this statement are legacy orphans.
+                  // Rows with undefined (older backend) default to current to avoid breaking existing data.
+                  const current = review.unmatched.filter(t => t.is_from_current_statement !== false);
+                  const legacy  = review.unmatched.filter(t => t.is_from_current_statement === false);
+
+                  if (review.unmatched.length === 0) {
+                    return (
                       <div className="text-center py-12 text-gray-400">
                         <div className="text-4xl mb-2">✅</div>
                         <p>כל העסקאות הותאמו!</p>
                       </div>
-                    ) : (
-                      review.unmatched.map((tx: ReviewTransaction) => (
-                        <UnmatchedRow
-                          key={tx.id}
-                          tx={tx}
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-6">
+                      {/* Info banner — only when legacy rows exist */}
+                      {legacy.length > 0 && (
+                        <div className="flex items-start gap-2 text-xs text-gray-500 bg-blue-50/60 border border-blue-100 rounded-md px-3 py-2">
+                          <span className="flex-shrink-0 mt-0.5 select-none">ℹ︎</span>
+                          <span>
+                            {legacy.length === 1
+                              ? 'תשלום אחד שלא שובץ בהעלאות קודמות מופיע בהמשך, מתחת לתשלומים מהקובץ הנוכחי.'
+                              : `${legacy.length} תשלומים שלא שובצו בהעלאות קודמות מופיעים בהמשך, מתחת לתשלומים מהקובץ הנוכחי.`}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Section 1: from the current uploaded statement */}
+                      <div>
+                        <div className="mb-3">
+                          <h3 className="text-sm font-semibold text-gray-900">
+                            מהקובץ שהעלית עכשיו
+                            <span className="text-gray-400 font-normal mr-2">{current.length} תשלומים</span>
+                          </h3>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            הקובץ שהעלית עתה: דף בנק {review.period}.
+                          </p>
+                        </div>
+                        {current.length === 0 ? (
+                          <div className="flex items-center gap-2 bg-teal-50 border border-teal-100 rounded-lg px-4 py-3 text-sm text-teal-700">
+                            <span className="text-teal-500 font-semibold">✓</span>
+                            כל התשלומים מהדף הזה שובצו לדיירים. אפשר לאשר את ההעלאה.
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {current.map((tx: ReviewTransaction) => (
+                              <UnmatchedRow
+                                key={tx.id}
+                                tx={tx}
+                                allTenants={review.all_tenants}
+                                selected={pendingMatches[tx.id] || ''}
+                                onSelect={tenantId => handleSelectTenant(tx.id, tenantId)}
+                                busy={busyRow === tx.id}
+                                onApprove={() => handleApproveRow(tx.id)}
+                                onReject={() => handleRejectRow(tx.id, 'unmatched')}
+                                onDelete={() => setPendingDeleteId(tx.id)}
+                                onOpenDrawer={() => setDrawerTx(tx)}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Section 2: orphans from previous uploads */}
+                      {legacy.length > 0 && (
+                        <LegacyUnmatchedSection
+                          rows={legacy}
                           allTenants={review.all_tenants}
-                          selected={pendingMatches[tx.id] || ''}
-                          onSelect={tenantId => handleSelectTenant(tx.id, tenantId)}
-                          busy={busyRow === tx.id}
-                          onApprove={() => handleApproveRow(tx.id)}
-                          onReject={() => handleRejectRow(tx.id, 'unmatched')}
-                          onDelete={() => setPendingDeleteId(tx.id)}
-                          onOpenDrawer={() => setDrawerTx(tx)}
+                          pendingMatches={pendingMatches}
+                          busyRow={busyRow}
+                          onSelect={handleSelectTenant}
+                          onApprove={handleApproveRow}
+                          onReject={(txId) => handleRejectRow(txId, 'unmatched')}
+                          onDelete={setPendingDeleteId}
+                          onOpenDrawer={setDrawerTx}
+                          defaultCollapsed={legacy.length > 3}
                         />
-                      ))
-                    )}
-                  </div>
-                )}
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* ── MATCHED TAB ── */}
                 {activeTab === 'matched' && (
@@ -901,10 +967,11 @@ interface UnmatchedRowProps {
   onReject: () => void;
   onDelete: () => void;
   onOpenDrawer: () => void;
+  meta?: React.ReactNode;
 }
 
 function UnmatchedRow({
-  tx, allTenants, selected, onSelect, busy, onApprove, onReject, onDelete, onOpenDrawer,
+  tx, allTenants, selected, onSelect, busy, onApprove, onReject, onDelete, onOpenDrawer, meta,
 }: UnmatchedRowProps) {
   const suggestions = tx.suggestions || [];
   const suggestionIds = new Set(suggestions.map(s => s.tenant_id));
@@ -922,6 +989,7 @@ function UnmatchedRow({
         <p className="text-xs text-gray-400 mt-0.5">
           {formatDate(tx.activity_date)} · {formatAmount(tx.credit_amount)}
         </p>
+        {meta && <div className="mt-1.5">{meta}</div>}
       </div>
 
       {/* Arrow */}
@@ -999,6 +1067,78 @@ function UnmatchedRow({
           <TrashIcon />
         </IconAction>
       </div>
+    </div>
+  );
+}
+
+interface LegacyUnmatchedSectionProps {
+  rows: ReviewTransaction[];
+  allTenants: MatchSuggestion[];
+  pendingMatches: Record<string, string>;
+  busyRow: string | null;
+  onSelect: (txId: string, tenantId: string) => void;
+  onApprove: (txId: string) => void;
+  onReject: (txId: string) => void;
+  onDelete: (txId: string) => void;
+  onOpenDrawer: (tx: ReviewTransaction) => void;
+  defaultCollapsed: boolean;
+}
+
+function LegacyUnmatchedSection({
+  rows, allTenants, pendingMatches, busyRow,
+  onSelect, onApprove, onReject, onDelete, onOpenDrawer,
+  defaultCollapsed,
+}: LegacyUnmatchedSectionProps) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50/60 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setCollapsed(c => !c)}
+        className="w-full flex items-center justify-between px-4 py-3 text-right hover:bg-gray-100/60 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-gray-700">תשלומים מהעלאות קודמות</span>
+          <span className="text-xs font-medium px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+            {rows.length}
+          </span>
+        </div>
+        <ChevronDownIcon
+          className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}
+        />
+      </button>
+
+      {!collapsed && (
+        <div className="px-4 pb-4">
+          <p className="text-xs text-gray-500 mb-3 pt-2 border-t border-gray-200">
+            תשלומים מדפי בנק שהעלית בעבר ועדיין לא שובצו לדייר. אינם חלק מהדף הנוכחי, אך מומלץ לטפל בהם.
+          </p>
+          <div className="space-y-2 border-r-2 border-amber-300 pr-3">
+            {rows.map((tx: ReviewTransaction) => (
+              <UnmatchedRow
+                key={tx.id}
+                tx={tx}
+                allTenants={allTenants}
+                selected={pendingMatches[tx.id] || ''}
+                onSelect={tenantId => onSelect(tx.id, tenantId)}
+                busy={busyRow === tx.id}
+                onApprove={() => onApprove(tx.id)}
+                onReject={() => onReject(tx.id)}
+                onDelete={() => onDelete(tx.id)}
+                onOpenDrawer={() => onOpenDrawer(tx)}
+                meta={
+                  tx.source_period_label ? (
+                    <span className="inline-block text-[11px] font-medium tracking-wide px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">
+                      מדף {tx.source_period_label}
+                    </span>
+                  ) : undefined
+                }
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

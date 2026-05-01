@@ -189,6 +189,8 @@ export interface ReviewTransaction {
   allocations?: Allocation[];
   // unmatched only:
   suggestions?: MatchSuggestion[];
+  is_from_current_statement?: boolean;
+  source_period_label?: string | null;
 }
 
 export interface ExpenseRow {

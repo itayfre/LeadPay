@@ -37,6 +37,18 @@ def _is_check_or_cash(description: str) -> bool:
     desc = description or ''
     return 'שיק' in desc or 'הפקדת מזומן' in desc or 'כספומט' in desc
 
+
+_HEBREW_MONTHS = {
+    1: 'ינואר', 2: 'פברואר', 3: 'מרץ', 4: 'אפריל',
+    5: 'מאי', 6: 'יוני', 7: 'יולי', 8: 'אוגוסט',
+    9: 'ספטמבר', 10: 'אוקטובר', 11: 'נובמבר', 12: 'דצמבר',
+}
+
+
+def _format_period_label(period_month: int, period_year: int) -> str:
+    month_name = _HEBREW_MONTHS.get(period_month, str(period_month))
+    return f"{month_name} {period_year}"
+
 router = APIRouter(
     prefix="/api/v1/statements",
     tags=["bank statements"]
@@ -489,6 +501,10 @@ def get_statement_review(
                 {'tenant_id': s[0], 'tenant_name': s[2], 'score': round(s[1], 2)}
                 for s in raw_suggestions
             ]
+        is_current = t.statement_id == statement_id
+        source_label: str | None = None
+        if not is_current and t.statement:
+            source_label = _format_period_label(t.statement.period_month, t.statement.period_year)
         unmatched.append({
             'id': str(t.id),
             'activity_date': t.activity_date.isoformat(),
@@ -498,6 +514,8 @@ def get_statement_review(
             'debit_amount': float(t.debit_amount) if t.debit_amount else None,
             'transaction_type': t.transaction_type.value if t.transaction_type else 'other',
             'suggestions': suggestions,
+            'is_from_current_statement': is_current,
+            'source_period_label': source_label,
         })
 
     # All tenants list (for manual selection dropdown in UI)

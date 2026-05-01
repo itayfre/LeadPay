@@ -86,5 +86,15 @@
     "loading": "Loading...",
     "error": "Error",
     "success": "Success"
+  },
+  "review": {
+    "currentSection": "From the file you just uploaded",
+    "currentSubtitle": "The file you uploaded: bank statement {{period}}.",
+    "currentEmpty": "All payments from this statement have been assigned to tenants. You can close the review.",
+    "legacySection": "Payments from previous uploads",
+    "legacySubtitle": "Payments from statements you uploaded before that have not yet been assigned to a tenant. These are not part of the current statement, but should be handled.",
+    "legacyChip": "From {{period}}",
+    "legacyBannerOne": "1 payment from a previous upload appears below, after the payments from the current statement.",
+    "legacyBannerMany": "{{count}} payments from previous uploads appear below, after the payments from the current statement."
   }
 }
