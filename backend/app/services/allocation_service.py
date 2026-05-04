@@ -2,16 +2,15 @@
 Allocation service — pure CRUD over `transaction_allocations`.
 
 Why a service layer?
-- Multiple routes (manual match, ignore, unmatch, future expense tagging)
-  need to write allocations, and we want a single place that enforces the
-  PR-2 invariants (≤1 tenant allocation per transaction; sum equals parent
-  amount; cleanup keeps `Transaction.matched_tenant_id` in sync).
+- Multiple routes (manual match, ignore, unmatch, expense tagging)
+  need to write allocations, and we want a single place that enforces
+  sum-equals-headline and keeps `Transaction.matched_tenant_id` in sync.
 - Routers stay thin and testable.
 
-PR-2 keeps `Transaction.matched_tenant_id` as a denormalized cache. Helpers
-in this module that mutate allocations also touch that column so the rest
-of the app (notably `routers/payments.py`) keeps working unchanged. PR-3
-will lift this dual-write once payment-status reads move to allocations.
+`matched_tenant_id` invariant (PR-3):
+  Set only when exactly one tenant allocation covers the full amount.
+  For splits (2+ allocations, or any non-tenant allocation) it is NULL
+  and reads go through `transaction_allocations`.
 """
 from __future__ import annotations
 
@@ -26,6 +25,8 @@ from ..models import (
     Transaction,
     TransactionAllocation,
 )
+
+_TOLERANCE = Decimal("0.01")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -158,8 +159,7 @@ def validate_sum_matches_amount(
     tolerance: Decimal = Decimal("0.01"),
 ) -> bool:
     """True when the allocation amounts sum to the transaction's headline
-    amount within `tolerance` (default 1 agora). Used by PR-3 split editing
-    to gate the "save" button. Doesn't touch the DB.
+    amount within tolerance. Used to gate the frontend save button.
     """
     headline = (
         Decimal(transaction.credit_amount)
@@ -171,3 +171,80 @@ def validate_sum_matches_amount(
         amount = a.amount if hasattr(a, "amount") else a["amount"]
         total += Decimal(amount)
     return abs(total - headline) <= tolerance
+
+
+def _headline_amount(transaction: Transaction) -> Decimal:
+    return (
+        Decimal(str(transaction.credit_amount))
+        if transaction.credit_amount is not None
+        else Decimal(str(transaction.debit_amount or 0))
+    )
+
+
+def set_split_allocations(
+    db: Session,
+    transaction: Transaction,
+    allocations: List[dict],
+) -> List[TransactionAllocation]:
+    """Atomically replace all allocations for `transaction` with the given list.
+
+    Each dict must contain:
+      - `amount` (Decimal or float, positive)
+      - `tenant_id` (UUID/str) OR `label` (str) — at least one required
+      - `period_month`, `period_year` (int, optional — derived from statement if absent)
+
+    Raises ValueError on sum mismatch or missing tenant_id/label.
+    Sets `transaction.matched_tenant_id` per the PR-3 invariant:
+      single full-amount tenant allocation → set it; anything else → None.
+    Callers must commit.
+    """
+    if not allocations:
+        raise ValueError("allocations list must not be empty")
+
+    headline = _headline_amount(transaction)
+    total = sum(Decimal(str(a["amount"])) for a in allocations)
+    if abs(total - headline) > _TOLERANCE:
+        raise ValueError(
+            f"Allocation sum ({total}) does not match transaction amount ({headline})"
+        )
+
+    for i, a in enumerate(allocations):
+        if not a.get("tenant_id") and not a.get("label"):
+            raise ValueError(f"allocation[{i}]: tenant_id or label is required")
+
+    clear_for_transaction(db, transaction.id)
+
+    created: List[TransactionAllocation] = []
+    for a in allocations:
+        pm = a.get("period_month")
+        py = a.get("period_year")
+        if pm is None or py is None:
+            derived_month, derived_year = derive_period(transaction, db)
+            pm = pm if pm is not None else derived_month
+            py = py if py is not None else derived_year
+
+        row = TransactionAllocation(
+            transaction_id=transaction.id,
+            tenant_id=a.get("tenant_id"),
+            label=a.get("label"),
+            amount=Decimal(str(a["amount"])),
+            period_month=pm,
+            period_year=py,
+            category=a.get("category"),
+            notes=a.get("notes"),
+        )
+        db.add(row)
+        created.append(row)
+
+    # Derive matched_tenant_id per PR-3 invariant
+    single_tenant = (
+        len(created) == 1
+        and created[0].tenant_id is not None
+        and abs(Decimal(str(created[0].amount)) - headline) <= _TOLERANCE
+    )
+    transaction.matched_tenant_id = (
+        created[0].tenant_id if single_tenant else None
+    )
+
+    db.flush()
+    return created

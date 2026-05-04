@@ -4,6 +4,7 @@ from .tenant import Tenant, OwnershipType, LanguagePreference
 from .bank_statement import BankStatement
 from .transaction import Transaction, TransactionType, MatchMethod
 from .transaction_allocation import TransactionAllocation, ALLOCATION_CATEGORIES
+from .expense_category import ExpenseCategory
 from .name_mapping import NameMapping, MappingCreatedBy
 from .vendor_mapping import VendorMapping
 from .message import Message, MessageType, DeliveryStatus
@@ -21,6 +22,7 @@ __all__ = [
     "MatchMethod",
     "TransactionAllocation",
     "ALLOCATION_CATEGORIES",
+    "ExpenseCategory",
     "NameMapping",
     "MappingCreatedBy",
     "VendorMapping",

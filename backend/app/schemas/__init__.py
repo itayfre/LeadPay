@@ -1,5 +1,6 @@
 from .building import BuildingCreate, BuildingUpdate, BuildingResponse
 from .tenant import TenantCreate, TenantUpdate, TenantResponse, TenantImportRow
+from .allocation import AllocationItem, SetAllocationsRequest, AllocationResponse
 
 __all__ = [
     "BuildingCreate",
@@ -9,4 +10,7 @@ __all__ = [
     "TenantUpdate",
     "TenantResponse",
     "TenantImportRow",
+    "AllocationItem",
+    "SetAllocationsRequest",
+    "AllocationResponse",
 ]

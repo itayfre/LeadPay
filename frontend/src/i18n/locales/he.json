@@ -63,7 +63,11 @@
     "noData": "אין נתונים לתקופה זו",
     "viewPayments": "צפה בסטטוס תשלומים",
     "editDetails": "ערוך פרטים",
-    "deleteBuilding": "מחק בניין"
+    "deleteBuilding": "מחק בניין",
+    "chart": {
+      "title": "מגמת גבייה — 13 חודשים",
+      "subtitle": "שיעור גבייה לכל בניין לפי חודש"
+    }
   },
   "whatsapp": {
     "title": "שלח תזכורות WhatsApp",
@@ -84,6 +88,7 @@
     "delete": "מחק",
     "edit": "ערוך",
     "loading": "טוען...",
+    "saving": "שומר...",
     "error": "שגיאה",
     "success": "הצלחה"
   },
@@ -96,5 +101,104 @@
     "legacyChip": "מדף {{period}}",
     "legacyBannerOne": "תשלום אחד שלא שובץ בהעלאות קודמות מופיע בהמשך, מתחת לתשלומים מהקובץ הנוכחי.",
     "legacyBannerMany": "{{count}} תשלומים שלא שובצו בהעלאות קודמות מופיעים בהמשך, מתחת לתשלומים מהקובץ הנוכחי."
+  },
+  "building": {
+    "tabs": {
+      "summary": "סיכום",
+      "collection": "גבייה",
+      "expenses": "הוצאות",
+      "aria_label": "ניווט לשוניות בניין"
+    },
+    "range": {
+      "thisMonth": "החודש",
+      "3months": "3 חודשים",
+      "6months": "6 חודשים",
+      "12months": "12 חודשים",
+      "custom": "מותאם אישית",
+      "from": "מ",
+      "to": "עד",
+      "months_count": "חודשים",
+      "error_order": "תאריך ההתחלה חייב להיות לפני תאריך הסיום"
+    },
+    "summary": {
+      "placeholder_title": "תרשימי סיכום בקרוב",
+      "placeholder_body": "לשונית הסיכום תציג KPIs, מגמות גבייה, הוצאות לפי קטגוריה ועוד."
+    },
+    "expenses": {
+      "placeholder_title": "ניהול הוצאות בקרוב",
+      "placeholder_body": "כאן תוכל לסווג הוצאות ולצפות בדוחות.",
+      "title": "הוצאות",
+      "items": "פריטים",
+      "bulk_categorize": "סווג בכמות",
+      "manage_categories": "ניהול קטגוריות",
+      "all": "הכל",
+      "uncategorized": "ללא קטגוריה",
+      "empty_title": "אין הוצאות לתקופה זו",
+      "empty_body": "הוצאות מדפי חשבון יופיעו כאן",
+      "no_match": "אין הוצאות לקטגוריה זו",
+      "col_date": "תאריך",
+      "col_description": "תיאור",
+      "col_vendor": "ספק",
+      "col_category": "קטגוריה",
+      "col_amount": "סכום",
+      "subtotal": "סה\"כ מסונן",
+      "total": "סה\"כ",
+      "bulk_categorize_title": "סיווג הוצאות בכמות",
+      "uncategorized_items": "פריטים ללא קטגוריה",
+      "select_category_to_assign": "בחר קטגוריה לשיוך",
+      "selected": "נבחרו",
+      "select_items": "בחר פריטים לסיווג",
+      "apply_category": "החל קטגוריה",
+      "bulk_error": "שגיאה בסיווג. נסה שוב."
+    },
+    "categories": {
+      "title": "ניהול קטגוריות",
+      "default": "ברירת מחדל",
+      "empty": "אין קטגוריות",
+      "add_new": "הוסף קטגוריה חדשה",
+      "name_placeholder": "שם קטגוריה...",
+      "add": "הוסף",
+      "duplicate_name": "קטגוריה בשם זה כבר קיימת",
+      "delete_blocked": "לא ניתן למחוק קטגוריה עם הוצאות משויכות"
+    }
+  },
+  "summary": {
+    "kpi": {
+      "avg_rate": "אחוז גבייה ממוצע",
+      "open_ar": "חוב פתוח (החודש)",
+      "open_ar_hint": "חוב מצטבר לתקופה הנוכחית",
+      "avg_days": "ממוצע ימים לתשלום",
+      "days": "ימים",
+      "exp_vs_income": "הוצאות מול הכנסות",
+      "income": "הכנסות",
+      "expenses": "הוצאות",
+      "expense_ratio": "הוצאות מהכנסות"
+    },
+    "chart": {
+      "no_data": "אין נתונים לתקופה זו",
+      "no_expenses": "אין הוצאות לתקופה זו",
+      "trend_title": "מגמת גבייה",
+      "expenses_title": "הוצאות לפי קטגוריה",
+      "aging_title": "פילוח זמן גבייה",
+      "worst_payers_title": "הגובים הכי פחות (TOP 5)"
+    },
+    "expenses": {
+      "uncategorized": "לא מסווג",
+      "uncategorized_prompt": "סווג הוצאות כדי לראות פילוח לפי קטגוריה",
+      "go_categorize": "עבור לניהול הוצאות"
+    },
+    "aging": {
+      "days_0_7": "שולם תוך 7 ימים",
+      "days_8_30": "8–30 ימים",
+      "days_31_60": "31–60 ימים",
+      "days_60plus": "60+ ימים",
+      "unpaid": "לא שולם",
+      "payments": "תשלומים"
+    },
+    "worst_payers": {
+      "apt": "דירה",
+      "no_data": "כל הדיירים שילמו בזמן! 🎉",
+      "hint": "לחץ על שורה לצפייה בפרטי הדייר"
+    }
   }
 }

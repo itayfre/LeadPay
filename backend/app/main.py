@@ -5,7 +5,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from .routers import buildings, tenants, statements, payments, messages, auth, users
+from .routers import buildings, tenants, statements, payments, messages, auth, users, expenses
 from .routers.statements import transactions_router, vendor_mappings_router
 
 APP_ENV = os.getenv("APP_ENV", "development")
@@ -65,6 +65,7 @@ app.include_router(transactions_router)
 app.include_router(vendor_mappings_router)
 app.include_router(payments.router)
 app.include_router(messages.router)
+app.include_router(expenses.router)
 
 
 @app.get("/")

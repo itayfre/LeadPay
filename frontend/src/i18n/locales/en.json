@@ -63,7 +63,11 @@
     "noData": "No data for this period",
     "viewPayments": "View Payment Status",
     "editDetails": "Edit Details",
-    "deleteBuilding": "Delete Building"
+    "deleteBuilding": "Delete Building",
+    "chart": {
+      "title": "Collection Trend — 13 Months",
+      "subtitle": "Collection rate per building by month"
+    }
   },
   "whatsapp": {
     "title": "Send WhatsApp Reminders",
@@ -84,6 +88,7 @@
     "delete": "Delete",
     "edit": "Edit",
     "loading": "Loading...",
+    "saving": "Saving...",
     "error": "Error",
     "success": "Success"
   },
@@ -96,5 +101,104 @@
     "legacyChip": "From {{period}}",
     "legacyBannerOne": "1 payment from a previous upload appears below, after the payments from the current statement.",
     "legacyBannerMany": "{{count}} payments from previous uploads appear below, after the payments from the current statement."
+  },
+  "building": {
+    "tabs": {
+      "summary": "Summary",
+      "collection": "Collection",
+      "expenses": "Expenses",
+      "aria_label": "Building tab navigation"
+    },
+    "range": {
+      "thisMonth": "This Month",
+      "3months": "3 Months",
+      "6months": "6 Months",
+      "12months": "12 Months",
+      "custom": "Custom",
+      "from": "From",
+      "to": "To",
+      "months_count": "months",
+      "error_order": "Start date must be before end date"
+    },
+    "summary": {
+      "placeholder_title": "Summary Charts Coming Soon",
+      "placeholder_body": "This tab will show KPIs, collection trends, expenses by category and more."
+    },
+    "expenses": {
+      "placeholder_title": "Expense Management Coming Soon",
+      "placeholder_body": "Here you will be able to categorize expenses and view reports.",
+      "title": "Expenses",
+      "items": "items",
+      "bulk_categorize": "Bulk Categorize",
+      "manage_categories": "Manage Categories",
+      "all": "All",
+      "uncategorized": "Uncategorized",
+      "empty_title": "No expenses for this period",
+      "empty_body": "Expenses from bank statements will appear here",
+      "no_match": "No expenses for this category",
+      "col_date": "Date",
+      "col_description": "Description",
+      "col_vendor": "Vendor",
+      "col_category": "Category",
+      "col_amount": "Amount",
+      "subtotal": "Filtered Total",
+      "total": "Total",
+      "bulk_categorize_title": "Bulk Categorize Expenses",
+      "uncategorized_items": "uncategorized items",
+      "select_category_to_assign": "Select a category to assign",
+      "selected": "selected",
+      "select_items": "Select items to categorize",
+      "apply_category": "Apply Category",
+      "bulk_error": "Error categorizing. Please try again."
+    },
+    "categories": {
+      "title": "Manage Categories",
+      "default": "default",
+      "empty": "No categories",
+      "add_new": "Add new category",
+      "name_placeholder": "Category name...",
+      "add": "Add",
+      "duplicate_name": "A category with this name already exists",
+      "delete_blocked": "Cannot delete a category with assigned expenses"
+    }
+  },
+  "summary": {
+    "kpi": {
+      "avg_rate": "Avg Collection Rate",
+      "open_ar": "Open AR (This Period)",
+      "open_ar_hint": "Cumulative debt for current period",
+      "avg_days": "Avg Days to Pay",
+      "days": "days",
+      "exp_vs_income": "Expenses vs Income",
+      "income": "Income",
+      "expenses": "Expenses",
+      "expense_ratio": "of income"
+    },
+    "chart": {
+      "no_data": "No data for this period",
+      "no_expenses": "No expenses for this period",
+      "trend_title": "Collection Trend",
+      "expenses_title": "Expenses by Category",
+      "aging_title": "Payment Timing Breakdown",
+      "worst_payers_title": "Lowest Payers (TOP 5)"
+    },
+    "expenses": {
+      "uncategorized": "Uncategorized",
+      "uncategorized_prompt": "Categorize expenses to see the breakdown by category",
+      "go_categorize": "Go to Expense Management"
+    },
+    "aging": {
+      "days_0_7": "Paid within 7 days",
+      "days_8_30": "8–30 days",
+      "days_31_60": "31–60 days",
+      "days_60plus": "60+ days",
+      "unpaid": "Unpaid",
+      "payments": "payments"
+    },
+    "worst_payers": {
+      "apt": "Apt",
+      "no_data": "All tenants paid on time! 🎉",
+      "hint": "Click a row to view tenant details"
+    }
   }
 }

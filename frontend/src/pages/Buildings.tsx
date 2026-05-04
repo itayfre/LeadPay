@@ -7,6 +7,8 @@ import { buildingsAPI, paymentsAPI } from '../services/api';
 import type { Building, BuildingPaymentSummary } from '../types';
 import ConfirmDialog from '../components/modals/ConfirmDialog';
 import BuildingEditModal from '../components/modals/BuildingEditModal';
+import CollectionTrendChart from '../components/charts/CollectionTrendChart';
+import { useCollectionTrend } from '../hooks/useCollectionTrend';
 
 export default function Buildings() {
   const { t } = useTranslation();
@@ -35,6 +37,13 @@ export default function Buildings() {
     queryKey: ['bulkSummary', selectedMonth, selectedYear],
     queryFn: () => paymentsAPI.getBulkSummary(selectedMonth, selectedYear),
   });
+
+  // Persist selected period so the building detail page can inherit it
+  const persistFilter = (month: number, year: number) => {
+    try { localStorage.setItem('lp:lastBuildingFilter', JSON.stringify({ month, year })); } catch { /* ignore */ }
+  };
+
+  const { data: trendData, isLoading: trendLoading } = useCollectionTrend();
 
   const summaryMap: Record<string, BuildingPaymentSummary> = Object.fromEntries(
     (bulkSummary || []).map(s => [s.building_id, s])
@@ -141,7 +150,7 @@ export default function Buildings() {
               {/* Period selector */}
               <select
                 value={selectedMonth}
-                onChange={e => setSelectedMonth(Number(e.target.value))}
+                onChange={e => { const m = Number(e.target.value); setSelectedMonth(m); persistFilter(m, selectedYear); }}
                 className="bg-white/20 text-white border border-white/30 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-white/50"
               >
                 {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
@@ -152,7 +161,7 @@ export default function Buildings() {
               </select>
               <select
                 value={selectedYear}
-                onChange={e => setSelectedYear(Number(e.target.value))}
+                onChange={e => { const y = Number(e.target.value); setSelectedYear(y); persistFilter(selectedMonth, y); }}
                 className="bg-white/20 text-white border border-white/30 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-white/50"
               >
                 {Array.from({ length: 3 }, (_, i) => new Date().getFullYear() - 1 + i).map(y => (
@@ -221,6 +230,25 @@ export default function Buildings() {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Collection Trend Chart */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <div className="flex items-center justify-between mb-4" dir="rtl">
+            <div>
+              <h2 className="text-base font-semibold text-gray-800">
+                {t('buildings.chart.title')}
+              </h2>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {t('buildings.chart.subtitle')}
+              </p>
+            </div>
+          </div>
+          {trendLoading ? (
+            <div className="h-72 rounded-lg bg-gray-100 animate-pulse" />
+          ) : (
+            <CollectionTrendChart data={trendData ?? []} />
+          )}
         </div>
 
         {/* Buildings Grid */}

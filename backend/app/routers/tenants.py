@@ -183,7 +183,12 @@ def delete_tenant(
     db: Session = Depends(get_db),
     _: User = Depends(require_manager),
 ):
-    """Delete a tenant, cleaning up soft references first."""
+    """Soft-delete a tenant (sets is_active=False).
+
+    The tenant record, payment history, and allocations are preserved so the
+    data can be restored via POST /{tenant_id}/restore. The tenant disappears
+    from all active-tenant views immediately.
+    """
     db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not db_tenant:
         raise HTTPException(
@@ -191,30 +196,34 @@ def delete_tenant(
             detail=f"Tenant with id {tenant_id} not found"
         )
 
-    try:
-        # Nullify matched_tenant_id on transactions (soft reference)
-        db.execute(
-            text("UPDATE transactions SET matched_tenant_id = NULL WHERE matched_tenant_id = :tid"),
-            {"tid": str(tenant_id)}
-        )
-        # Delete related messages and name_mappings (hard references)
-        db.execute(
-            text("DELETE FROM messages WHERE tenant_id = :tid"),
-            {"tid": str(tenant_id)}
-        )
-        db.execute(
-            text("DELETE FROM name_mappings WHERE tenant_id = :tid"),
-            {"tid": str(tenant_id)}
-        )
-        db.delete(db_tenant)
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"לא ניתן למחוק דייר זה. ייתכן שיש לו נתונים משויכים במערכת."
-        )
+    db_tenant.is_active = False
+    db.commit()
     return None
+
+
+@router.post("/{tenant_id}/restore", status_code=status.HTTP_200_OK)
+def restore_tenant(
+    tenant_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_manager),
+):
+    """Restore a soft-deleted tenant (sets is_active=True)."""
+    db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not db_tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Tenant with id {tenant_id} not found"
+        )
+    if db_tenant.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant is already active"
+        )
+
+    db_tenant.is_active = True
+    db.commit()
+    db.refresh(db_tenant)
+    return {"ok": True, "tenant_id": str(tenant_id)}
 
 
 @router.post("/{building_id}/apartments/resolve")

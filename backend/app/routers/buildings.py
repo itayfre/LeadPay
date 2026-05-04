@@ -11,6 +11,7 @@ from ..models import Building, Apartment, Tenant
 from ..models.user import User
 from ..schemas import BuildingCreate, BuildingUpdate, BuildingResponse
 from ..dependencies.auth import require_manager, require_worker_plus, require_any_auth
+from ..services.expense_categories import seed_default_categories
 
 router = APIRouter(
     prefix="/api/v1/buildings",
@@ -36,6 +37,11 @@ def create_building(
     try:
         db_building = Building(**building.model_dump())
         db.add(db_building)
+        db.flush()  # populate db_building.id before seeding categories
+
+        # Seed 6 default expense categories for the new building.
+        seed_default_categories(db, db_building.id)
+
         db.commit()
         db.refresh(db_building)
         return db_building

@@ -1,146 +1,45 @@
-import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import Layout from '../components/layout/Layout';
-import { paymentsAPI, buildingsAPI, messagesAPI, tenantsAPI, apartmentsAPI } from '../services/api';
-import type { PaymentStatus, WhatsAppMessage, TenantPaymentHistory } from '../types';
+import { buildingsAPI } from '../services/api';
+import BuildingTabs, { type BuildingTab } from '../components/building/BuildingTabs';
+import PeriodRangePicker from '../components/building/PeriodRangePicker';
+import CollectionTab from '../components/building/CollectionTab';
+import SummaryTab from '../components/building/SummaryTab';
+import ExpensesTab from '../components/building/ExpensesTab';
+import { useBuildingPeriodRange } from '../hooks/useBuildingPeriodRange';
+
+const VALID_TABS: BuildingTab[] = ['summary', 'collection', 'expenses'];
 
 export default function Dashboard() {
   const { t } = useTranslation();
   const { buildingId } = useParams<{ buildingId: string }>();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const [togglingLanguage, setTogglingLanguage] = useState<string | null>(null);
-  const [editingExpectedId, setEditingExpectedId] = useState<string | null>(null);
-  const [editingExpectedValue, setEditingExpectedValue] = useState<string>('');
-  const [savingExpected, setSavingExpected] = useState(false);
-  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
-  const [whatsappMessages, setWhatsappMessages] = useState<WhatsAppMessage[]>([]);
-  const [manualPaymentFor, setManualPaymentFor] = useState<PaymentStatus | null>(null);
-  const [manualAmount, setManualAmount] = useState<string>('');
-  const [manualNote, setManualNote] = useState<string>('');
-  const [savingManual, setSavingManual] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  // Payment history modal state
-  const [historyTenantId, setHistoryTenantId] = useState<string | null>(null);
-  const [selectedHistoryMonth, setSelectedHistoryMonth] = useState<{ month: number; year: number } | null>(null);
+  // ── Tab state (URL-synced) ─────────────────────────────────────────────────
+  const rawTab = searchParams.get('tab') as BuildingTab | null;
+  const activeTab: BuildingTab = rawTab && VALID_TABS.includes(rawTab) ? rawTab : 'summary';
 
-  // Sort state
-  const [sortColumn, setSortColumn] = useState<string>('apartment_number');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const setTab = (tab: BuildingTab) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', tab);
+      return next;
+    }, { replace: true });
+  };
 
-  // Get current month and year
-  const now = new Date();
-  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
-  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+  // ── Period range (URL-synced) ──────────────────────────────────────────────
+  const { range, setRange } = useBuildingPeriodRange();
 
-  // Fetch building details
+  // ── Building header data ───────────────────────────────────────────────────
   const { data: building } = useQuery({
     queryKey: ['building', buildingId],
     queryFn: () => buildingsAPI.get(buildingId!),
     enabled: !!buildingId,
   });
-
-  // Fetch payment status
-  const { data: paymentStatus, isLoading, error } = useQuery({
-    queryKey: ['paymentStatus', buildingId, selectedMonth, selectedYear],
-    queryFn: () => paymentsAPI.getStatus(buildingId!, selectedMonth, selectedYear),
-    enabled: !!buildingId,
-  });
-
-  // Fetch tenant payment history
-  const { data: tenantHistory, isLoading: historyLoading } = useQuery({
-    queryKey: ['tenantHistory', historyTenantId],
-    queryFn: () => paymentsAPI.getTenantHistory(historyTenantId!),
-    enabled: !!historyTenantId,
-  });
-
-  const handleSort = (column: string) => {
-    if (sortColumn === column) {
-      setSortDirection(d => d === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortColumn(column);
-      setSortDirection('asc');
-    }
-  };
-
-  const sortedTenants = [...(paymentStatus?.tenants || [])].sort((a, b) => {
-    const dir = sortDirection === 'asc' ? 1 : -1;
-    const aVal = (a as any)[sortColumn];
-    const bVal = (b as any)[sortColumn];
-    if (typeof aVal === 'number') return (aVal - bVal) * dir;
-    return String(aVal || '').localeCompare(String(bVal || ''), 'he') * dir;
-  });
-
-  const SortIcon = ({ column }: { column: string }) => (
-    <span className={`ml-1 text-xs ${sortColumn === column ? 'text-blue-600' : 'text-gray-300'}`}>
-      {sortColumn === column ? (sortDirection === 'asc' ? '▲' : '▼') : '⇅'}
-    </span>
-  );
-
-  const handleToggleLanguage = async (payment: PaymentStatus) => {
-    if (togglingLanguage === payment.tenant_id) return;
-    setTogglingLanguage(payment.tenant_id);
-    const newLang = payment.language === 'he' ? 'en' : 'he';
-    try {
-      await tenantsAPI.update(payment.tenant_id, { language: newLang as 'he' | 'en' });
-      queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId, selectedMonth, selectedYear] });
-    } catch (err) {
-      console.error('Failed to update language:', err);
-    } finally {
-      setTogglingLanguage(null);
-    }
-  };
-
-  const handleSaveExpected = async (payment: PaymentStatus) => {
-    setSavingExpected(true);
-    try {
-      const val = editingExpectedValue === '' ? null : parseFloat(editingExpectedValue);
-      await apartmentsAPI.patch(payment.apartment_id, { expected_payment: val });
-      queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId, selectedMonth, selectedYear] });
-      setEditingExpectedId(null);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSavingExpected(false);
-    }
-  };
-
-  const handleGenerateReminders = async () => {
-    if (!buildingId) return;
-
-    try {
-      const response = await messagesAPI.generateReminders(buildingId, true);
-      setWhatsappMessages(response.messages);
-      setShowWhatsAppModal(true);
-    } catch (err) {
-      console.error('Failed to generate reminders:', err);
-    }
-  };
-
-  const handleManualPayment = async () => {
-    if (!manualPaymentFor || !buildingId) return;
-    setSavingManual(true);
-    try {
-      await paymentsAPI.postManualPayment({
-        building_id: buildingId,
-        tenant_id: manualPaymentFor.tenant_id,
-        amount: parseFloat(manualAmount),
-        month: selectedMonth,
-        year: selectedYear,
-        note: manualNote || undefined,
-      });
-      queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId, selectedMonth, selectedYear] });
-      setManualPaymentFor(null);
-      setManualAmount('');
-      setManualNote('');
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSavingManual(false);
-    }
-  };
 
   if (!buildingId) {
     return (
@@ -152,59 +51,28 @@ export default function Dashboard() {
     );
   }
 
-  if (isLoading) {
-    return (
-      <Layout>
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">{t('common.loading')}</p>
-          </div>
-        </div>
-      </Layout>
-    );
-  }
-
-  if (error) {
-    return (
-      <Layout>
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-800">{t('common.error')}: {(error as Error).message}</p>
-        </div>
-      </Layout>
-    );
-  }
-
-  const summary = paymentStatus?.summary || {
-    total_tenants: 0,
-    paid: 0,
-    partial: 0,
-    unpaid: 0,
-    total_expected: 0,
-    total_collected: 0,
-    collection_rate: '0%',
-    amount_rate: '0%',
-  };
-  const collectionRateNum = parseFloat(summary.collection_rate) || 0;
-
   return (
     <Layout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex justify-between items-start">
+      <div className="space-y-5">
+        {/* ── Building header ─────────────────────────────────────────────── */}
+        <div className="flex justify-between items-start" dir="rtl">
           <div>
             <button
               onClick={() => navigate('/buildings')}
-              className="text-blue-600 hover:text-blue-800 mb-2 flex items-center gap-1"
+              className="text-blue-600 hover:text-blue-800 mb-2 flex items-center gap-1 text-sm"
             >
               ← {t('nav.buildings')}
             </button>
-            <h2 className="text-2xl font-bold text-gray-900">{building?.name}</h2>
-            <p className="text-sm text-gray-500">
-              📍 {building?.address}, {building?.city}
-            </p>
+            <h2 className="text-2xl font-bold text-gray-900">
+              {building?.name ?? t('common.loading')}
+            </h2>
+            {building && (
+              <p className="text-sm text-gray-500">
+                📍 {building.address}, {building.city}
+              </p>
+            )}
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
             <button
               onClick={() => navigate(`/building/${buildingId}/tenants`)}
               className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors font-medium text-sm"
@@ -213,582 +81,32 @@ export default function Dashboard() {
             </button>
             <button
               onClick={() => navigate(`/building/${buildingId}/upload`)}
-              className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+              className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors font-medium text-sm"
             >
               📄 {t('dashboard.uploadStatement')}
             </button>
-            <button
-              onClick={handleGenerateReminders}
-              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors font-medium"
-            >
-              💬 {t('dashboard.sendReminders')}
-            </button>
           </div>
         </div>
 
-        {/* Period Selector */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4 flex items-center gap-4">
-          <label className="font-medium text-gray-700">{t('dashboard.period')}:</label>
-          <select
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(Number(e.target.value))}
-            className="border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
-              <option key={month} value={month}>
-                {new Date(2024, month - 1).toLocaleString('he-IL', { month: 'long' })}
-              </option>
-            ))}
-          </select>
-          <select
-            value={selectedYear}
-            onChange={(e) => setSelectedYear(Number(e.target.value))}
-            className="border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            {Array.from({ length: 3 }, (_, i) => new Date().getFullYear() - 1 + i).map((year) => (
-              <option key={year} value={year}>
-                {year}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* ── Tabs + range picker row ──────────────────────────────────────── */}
+        <BuildingTabs activeTab={activeTab} onChange={setTab} />
+        <PeriodRangePicker range={range} onChange={setRange} />
 
-        {/* Show manage tenants CTA if no tenants */}
-        {summary.total_tenants === 0 ? (
-          <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-8 text-center">
-            <div className="text-5xl mb-3">👥</div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2">{t('dashboard.noTenants')}</h3>
-            <p className="text-gray-600 mb-5">{t('dashboard.noTenantsHint')}</p>
-            <button
-              onClick={() => navigate(`/building/${buildingId}/tenants`)}
-              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors shadow-md"
-            >
-              👥 {t('dashboard.manageTenants')}
-            </button>
-          </div>
-        ) : (
-          <>
-            {/* Summary Statistics */}
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-              <StatCard
-                title={t('dashboard.paid')}
-                value={summary.paid}
-                total={summary.total_tenants}
-                color="green"
-                icon="✅"
-              />
-              {(summary.partial ?? 0) > 0 && (
-                <StatCard
-                  title={t('dashboard.partial')}
-                  value={summary.partial ?? 0}
-                  total={summary.total_tenants}
-                  color="orange"
-                  icon="⚠️"
-                />
-              )}
-              <StatCard
-                title={t('dashboard.unpaid')}
-                value={summary.unpaid}
-                total={summary.total_tenants}
-                color="red"
-                icon="❌"
-              />
-              <StatCard
-                title={t('dashboard.totalExpected')}
-                value={`₪${summary.total_expected.toLocaleString()}`}
-                color="blue"
-                icon="💰"
-              />
-              <StatCard
-                title={t('dashboard.collectionRate')}
-                value={`${Math.round(collectionRateNum)}%`}
-                color="purple"
-                icon="📊"
-              />
-            </div>
-
-            {/* Payment Status Table */}
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th
-                    onClick={() => handleSort('apartment_number')}
-                    className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
-                  >
-                    {t('payment.apartment')}<SortIcon column="apartment_number" />
-                  </th>
-                  <th
-                    onClick={() => handleSort('tenant_name')}
-                    className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
-                  >
-                    {t('payment.tenant')}<SortIcon column="tenant_name" />
-                  </th>
-                  <th
-                    onClick={() => handleSort('expected_amount')}
-                    className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
-                  >
-                    {t('payment.expected')}<SortIcon column="expected_amount" />
-                  </th>
-                  <th
-                    onClick={() => handleSort('paid_amount')}
-                    className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
-                  >
-                    {t('payment.paid')}<SortIcon column="paid_amount" />
-                  </th>
-                  <th
-                    onClick={() => handleSort('total_debt')}
-                    className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
-                  >
-                    חוב כולל<SortIcon column="total_debt" />
-                  </th>
-                  <th
-                    onClick={() => handleSort('status')}
-                    className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
-                  >
-                    {t('payment.status')}<SortIcon column="status" />
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    שפה
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    {t('payment.actions')}
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {sortedTenants.length > 0 ? (
-                  sortedTenants.map((payment) => (
-                    <tr key={payment.tenant_id} className="hover:bg-gray-50">
-                      <td
-                        className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600 cursor-pointer hover:underline"
-                        onClick={() => { setHistoryTenantId(payment.tenant_id); setSelectedHistoryMonth(null); }}
-                      >
-                        {payment.apartment_number}
-                      </td>
-                      <td
-                        className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 cursor-pointer hover:text-blue-600"
-                        onClick={() => { setHistoryTenantId(payment.tenant_id); setSelectedHistoryMonth(null); }}
-                      >
-                        {payment.tenant_name}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        {editingExpectedId === payment.tenant_id ? (
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="number"
-                              value={editingExpectedValue}
-                              onChange={e => setEditingExpectedValue(e.target.value)}
-                              className="w-24 border border-gray-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500"
-                              autoFocus
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') handleSaveExpected(payment);
-                                if (e.key === 'Escape') setEditingExpectedId(null);
-                              }}
-                            />
-                            <button onClick={() => handleSaveExpected(payment)} disabled={savingExpected}
-                              className="text-green-600 hover:text-green-800 text-xs font-bold px-1">✓</button>
-                            <button onClick={() => setEditingExpectedId(null)}
-                              className="text-gray-400 hover:text-gray-600 text-xs px-1">✕</button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => {
-                              setEditingExpectedId(payment.tenant_id);
-                              setEditingExpectedValue(payment.expected_amount.toString());
-                            }}
-                            className="text-gray-900 hover:text-blue-600 hover:underline cursor-pointer font-medium"
-                            title="לחץ לעריכה"
-                          >
-                            ₪{payment.expected_amount.toLocaleString()}
-                          </button>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <button
-                          onClick={() => {
-                            setManualPaymentFor(payment);
-                            setManualAmount(payment.expected_amount.toString());
-                            setManualNote('');
-                          }}
-                          className="text-gray-900 hover:text-green-600 hover:underline cursor-pointer"
-                          title="לחץ להזנת תשלום ידני"
-                        >
-                          ₪{payment.paid_amount.toLocaleString()}
-                        </button>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <span className={(payment as any).total_debt > 0 ? 'text-red-600' : 'text-gray-400'}>
-                          {(payment as any).total_debt > 0
-                            ? `₪${Math.round((payment as any).total_debt).toLocaleString()}`
-                            : '—'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span
-                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            payment.status === 'paid'
-                              ? 'bg-green-100 text-green-800'
-                              : payment.status === 'partial'
-                              ? 'bg-orange-100 text-orange-800'
-                              : 'bg-red-100 text-red-800'
-                          }`}
-                        >
-                          {payment.status === 'paid'
-                            ? '✅ ' + t('dashboard.paid')
-                            : payment.status === 'partial'
-                            ? '⚠️ ' + t('dashboard.partial')
-                            : '❌ ' + t('dashboard.unpaid')}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <button
-                          onClick={() => handleToggleLanguage(payment)}
-                          disabled={togglingLanguage === payment.tenant_id}
-                          className={`inline-flex px-2 py-0.5 text-xs rounded font-medium transition-colors cursor-pointer
-                            ${payment.language === 'he'
-                              ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
-                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                            } disabled:opacity-50`}
-                          title="לחץ לשינוי שפה"
-                        >
-                          {togglingLanguage === payment.tenant_id ? '...' : payment.language === 'he' ? 'עב' : 'EN'}
-                        </button>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        {payment.status !== 'paid' && payment.phone && (
-                          <button
-                            onClick={async () => {
-                              // Use cached messages if available, otherwise generate once
-                              let msgs = whatsappMessages;
-                              if (msgs.length === 0) {
-                                const response = await messagesAPI.generateReminders(buildingId, true);
-                                msgs = response.messages;
-                                setWhatsappMessages(msgs);
-                              }
-                              const tenantMessage = msgs.find(
-                                (m) => m.tenant_id === payment.tenant_id
-                              );
-                              if (tenantMessage) {
-                                window.open(tenantMessage.whatsapp_link, '_blank');
-                              }
-                            }}
-                            className="text-green-600 hover:text-green-800 font-medium"
-                          >
-                            📱 {t('payment.sendWhatsApp')}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
-                      אין נתוני תשלומים לתקופה זו
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-          </>
+        {/* ── Tab content ─────────────────────────────────────────────────── */}
+        {activeTab === 'summary' && (
+          <SummaryTab
+            buildingId={buildingId}
+            range={range}
+            onGoToExpenses={() => setTab('expenses')}
+          />
+        )}
+        {activeTab === 'collection' && (
+          <CollectionTab buildingId={buildingId} range={range} />
+        )}
+        {activeTab === 'expenses' && (
+          <ExpensesTab buildingId={buildingId} range={range} />
         )}
       </div>
-
-      {/* Manual Payment Modal */}
-      {manualPaymentFor && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
-            <h3 className="text-lg font-bold text-gray-900">סמן כשולם — {manualPaymentFor.tenant_name}</h3>
-            <p className="text-sm text-gray-500">
-              דירה {manualPaymentFor.apartment_number} • {String(selectedMonth).padStart(2,'0')}/{selectedYear}
-            </p>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">סכום (₪)</label>
-              <input
-                type="number"
-                value={manualAmount}
-                onChange={e => setManualAmount(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                placeholder="500"
-                autoFocus
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">הערה (אופציונלי)</label>
-              <input
-                type="text"
-                value={manualNote}
-                onChange={e => setManualNote(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                placeholder="תשלום במזומן"
-              />
-            </div>
-            <div className="flex gap-3 pt-2">
-              <button
-                onClick={() => setManualPaymentFor(null)}
-                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-              >
-                ביטול
-              </button>
-              <button
-                onClick={handleManualPayment}
-                disabled={!manualAmount || isNaN(parseFloat(manualAmount)) || parseFloat(manualAmount) <= 0 || savingManual}
-                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-semibold"
-              >
-                {savingManual ? 'שומר...' : '✓ אשר תשלום'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* WhatsApp Modal */}
-      {showWhatsAppModal && (
-        <WhatsAppModal
-          messages={whatsappMessages}
-          onClose={() => setShowWhatsAppModal(false)}
-        />
-      )}
-
-      {/* Payment History Modal */}
-      {historyTenantId && (
-        <PaymentHistoryModal
-          tenantHistory={tenantHistory}
-          isLoading={historyLoading}
-          selectedMonthData={selectedHistoryMonth}
-          onSelectMonth={setSelectedHistoryMonth}
-          onClose={() => { setHistoryTenantId(null); setSelectedHistoryMonth(null); }}
-        />
-      )}
     </Layout>
-  );
-}
-
-interface StatCardProps {
-  title: string;
-  value: string | number;
-  total?: number;
-  color: 'green' | 'red' | 'blue' | 'purple' | 'orange';
-  icon: string;
-}
-
-function StatCard({ title, value, total, color, icon }: StatCardProps) {
-  const colorClasses = {
-    green: 'bg-green-50 border-green-200 text-green-800',
-    red: 'bg-red-50 border-red-200 text-red-800',
-    blue: 'bg-blue-50 border-blue-200 text-blue-800',
-    purple: 'bg-purple-50 border-purple-200 text-purple-800',
-    orange: 'bg-orange-50 border-orange-200 text-orange-800',
-  };
-
-  return (
-    <div className={`rounded-lg border-2 p-6 ${colorClasses[color]}`}>
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium opacity-80">{title}</p>
-          <p className="text-2xl font-bold mt-1">
-            {value}
-            {total !== undefined && <span className="text-lg opacity-70">/{total}</span>}
-          </p>
-        </div>
-        <div className="text-4xl opacity-50">{icon}</div>
-      </div>
-    </div>
-  );
-}
-
-interface WhatsAppModalProps {
-  messages: WhatsAppMessage[];
-  onClose: () => void;
-}
-
-function WhatsAppModal({ messages, onClose }: WhatsAppModalProps) {
-  const { t } = useTranslation();
-  const [sentMessages, setSentMessages] = useState<Set<string>>(new Set());
-
-  const handleSendMessage = async (message: WhatsAppMessage) => {
-    window.open(message.whatsapp_link, '_blank');
-    const msgId = message.message_id || message.tenant_id;
-    setSentMessages((prev) => new Set(prev).add(msgId));
-
-    if (message.message_id) {
-      try {
-        await messagesAPI.markSent(message.message_id);
-      } catch (err) {
-        console.error('Failed to mark message as sent:', err);
-      }
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex justify-between items-center">
-            <h3 className="text-xl font-bold text-gray-900">{t('whatsapp.title')}</h3>
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 text-2xl"
-            >
-              ×
-            </button>
-          </div>
-          <p className="text-sm text-gray-500 mt-1">
-            {t('whatsapp.ready')}: {messages.length} הודעות
-          </p>
-        </div>
-
-        <div className="overflow-y-auto max-h-[60vh] p-6 space-y-4">
-          {messages.map((message) => {
-            const msgId = message.message_id || message.tenant_id;
-            return (
-            <div
-              key={msgId}
-              className="border border-gray-200 rounded-lg p-4 hover:border-green-300 transition-colors"
-            >
-              <div className="flex justify-between items-start mb-3">
-                <div>
-                  <p className="font-medium text-gray-900">{message.tenant_name}</p>
-                  <p className="text-sm text-gray-500">{message.phone}</p>
-                </div>
-                <button
-                  onClick={() => handleSendMessage(message)}
-                  disabled={sentMessages.has(msgId)}
-                  className={`px-4 py-2 rounded-md font-medium transition-colors ${
-                    sentMessages.has(msgId)
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : 'bg-green-600 text-white hover:bg-green-700'
-                  }`}
-                >
-                  {sentMessages.has(msgId) ? `✓ ${t('whatsapp.sent')}` : `📱 ${t('whatsapp.click')}`}
-                </button>
-              </div>
-              <div className="bg-gray-50 rounded p-3 text-sm text-gray-700 whitespace-pre-wrap" dir="auto">
-                {message.message_preview}
-              </div>
-            </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-interface PaymentHistoryModalProps {
-  tenantHistory: TenantPaymentHistory | undefined;
-  isLoading: boolean;
-  selectedMonthData: { month: number; year: number } | null;
-  onSelectMonth: (m: { month: number; year: number }) => void;
-  onClose: () => void;
-}
-
-function PaymentHistoryModal({ tenantHistory, isLoading, selectedMonthData, onSelectMonth, onClose }: PaymentHistoryModalProps) {
-  const activeMonth = selectedMonthData
-    ? tenantHistory?.months.find(m => m.month === selectedMonthData.month && m.year === selectedMonthData.year)
-    : tenantHistory?.months[tenantHistory.months.length - 1];
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="p-6 border-b border-gray-200 flex justify-between items-center">
-          <div>
-            <h3 className="text-xl font-bold text-gray-900">
-              היסטוריית תשלומים — {tenantHistory?.tenant_name}
-            </h3>
-            <p className="text-sm text-gray-500">
-              דירה {tenantHistory?.apartment_number} • מאז {tenantHistory?.move_in_date ?? '—'}
-            </p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700 text-lg">✕</button>
-        </div>
-
-        {isLoading ? (
-          <div className="flex-1 flex items-center justify-center p-12">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
-          </div>
-        ) : !tenantHistory ? (
-          <div className="flex-1 flex items-center justify-center p-12 text-gray-400">אין נתונים</div>
-        ) : (
-          <div className="flex flex-1 overflow-hidden">
-            {/* Left: Month-by-month table */}
-            <div className="w-1/2 overflow-y-auto border-r border-gray-200">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 sticky top-0">
-                  <tr>
-                    <th className="px-4 py-2 text-right text-xs text-gray-500">תקופה</th>
-                    <th className="px-4 py-2 text-right text-xs text-gray-500">צפוי</th>
-                    <th className="px-4 py-2 text-right text-xs text-gray-500">שולם</th>
-                    <th className="px-4 py-2 text-right text-xs text-gray-500">הפרש</th>
-                    <th className="px-4 py-2 text-right text-xs text-gray-500">סטטוס</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {[...tenantHistory.months].reverse().map(m => {
-                    const isActive = activeMonth?.month === m.month && activeMonth?.year === m.year;
-                    return (
-                      <tr
-                        key={`${m.year}-${m.month}`}
-                        onClick={() => onSelectMonth({ month: m.month, year: m.year })}
-                        className={`cursor-pointer hover:bg-blue-50 transition-colors ${isActive ? 'bg-blue-50 font-medium' : ''}`}
-                      >
-                        <td className="px-4 py-2 text-gray-700">{m.period}</td>
-                        <td className="px-4 py-2 text-gray-600">₪{m.expected.toLocaleString()}</td>
-                        <td className="px-4 py-2 text-gray-900">₪{m.paid.toLocaleString()}</td>
-                        <td className={`px-4 py-2 ${m.difference < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                          {m.difference >= 0 ? '+' : ''}₪{m.difference.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-2">
-                          <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                            m.status === 'paid' ? 'bg-green-100 text-green-700' :
-                            m.status === 'partial' ? 'bg-yellow-100 text-yellow-700' :
-                            'bg-red-100 text-red-700'
-                          }`}>
-                            {m.status === 'paid' ? '✓ שולם' : m.status === 'partial' ? '⚠ חלקי' : '✗ לא שולם'}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Right: Transactions for selected month */}
-            <div className="w-1/2 overflow-y-auto p-4">
-              {activeMonth ? (
-                <>
-                  <h4 className="font-semibold text-gray-700 mb-3">עסקאות — {activeMonth.period}</h4>
-                  {activeMonth.transactions.length === 0 ? (
-                    <p className="text-gray-400 text-sm text-center py-8">אין עסקאות לתקופה זו</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {activeMonth.transactions.map(txn => (
-                        <div key={txn.id} className="border border-gray-200 rounded-lg p-3 space-y-1">
-                          <div className="flex justify-between items-start">
-                            <span className="font-semibold text-green-700">₪{txn.amount.toLocaleString()}</span>
-                            <span className="text-xs text-gray-400">{txn.date}</span>
-                          </div>
-                          <p className="text-sm text-gray-600 truncate">{txn.description}</p>
-                          {txn.is_manual && (
-                            <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">ידני</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-gray-400 text-sm text-center py-8">בחר חודש מהרשימה</p>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
   );
 }

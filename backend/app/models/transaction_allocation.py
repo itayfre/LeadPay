@@ -88,9 +88,18 @@ class TransactionAllocation(Base):
         String(32),
         nullable=True,
         comment=(
-            "Expense category — populated in PR-4 by the vendor classifier. "
-            f"Expected values: {', '.join(ALLOCATION_CATEGORIES)}"
+            "Legacy expense category (string) — populated by the vendor classifier "
+            f"at upload time. Expected values: {', '.join(ALLOCATION_CATEGORIES)}. "
+            "DEPRECATED for new UI: use category_id instead. Kept for backward compat."
         ),
+    )
+
+    category_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("expense_categories.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="User-defined per-building category (introduced post PR-4).",
     )
 
     notes = Column(String, nullable=True)
@@ -100,6 +109,7 @@ class TransactionAllocation(Base):
     # Relationships
     transaction = relationship("Transaction", back_populates="allocations")
     tenant = relationship("Tenant", back_populates="allocations")
+    category_ref = relationship("ExpenseCategory", back_populates="allocations")
 
     __table_args__ = (
         # Every allocation must point somewhere — at a tenant, a label, or both.

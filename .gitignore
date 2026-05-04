@@ -32,3 +32,4 @@ uploads/
 *.sqlite3
 # Debrief reports
 Debrief/
+.vercel

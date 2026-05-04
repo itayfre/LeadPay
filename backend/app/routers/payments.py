@@ -1,25 +1,27 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, and_
+from sqlalchemy import func, or_, and_, exists, select, tuple_
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime, date
+from decimal import Decimal
 from collections import defaultdict
 
 from ..database import get_db
 from ..models import (
     Building, Apartment, Tenant, Transaction,
-    BankStatement, TransactionType, MatchMethod
+    BankStatement, TransactionType, MatchMethod, TransactionAllocation,
+    ExpenseCategory,
 )
 from ..models.user import User
+from ..services import allocation_service
 from ..dependencies.auth import require_worker_plus, require_viewer_plus
 
 router = APIRouter(
     prefix="/api/v1/payments",
     tags=["payments"]
 )
-
 
 
 @router.get("/bulk-summary")
@@ -33,6 +35,10 @@ def get_bulk_payment_summary(
     Return payment summary for ALL buildings for a given month/year.
     Uses grouped queries — no N+1 problem.
     Falls back to current month/year if not specified.
+
+    Each row includes `total_expected` — the sum of active tenants'
+    expected payments for the period (apartment.expected_payment with
+    fallback to building.expected_monthly_payment).
     """
     from datetime import datetime as dt
     if month is None or year is None:
@@ -40,14 +46,13 @@ def get_bulk_payment_summary(
         month = now.month
         year = now.year
 
-    # Get all buildings
     buildings = db.query(Building).all()
     if not buildings:
         return []
 
     building_ids = [b.id for b in buildings]
 
-    # Get active tenant counts per building (one query)
+    # Active tenant counts per building
     tenant_counts = {
         str(building_id): count
         for building_id, count in db.query(Apartment.building_id, func.count(Tenant.id))
@@ -60,29 +65,29 @@ def get_bulk_payment_summary(
         .all()
     }
 
-    # Get paid tenant IDs and amounts per building for the period (one query)
+    # Paid amounts via allocations, filtered by allocation's own period fields
     paid_rows = (
         db.query(
-            Building.id.label("building_id"),
-            Transaction.matched_tenant_id,
-            func.sum(Transaction.credit_amount).label("total_paid")
+            Apartment.building_id.label("building_id"),
+            TransactionAllocation.tenant_id,
+            func.sum(TransactionAllocation.amount).label("total_paid")
         )
-        .join(BankStatement, BankStatement.building_id == Building.id)
-        .join(Transaction, Transaction.statement_id == BankStatement.id)
-        .join(Tenant, Tenant.id == Transaction.matched_tenant_id)
+        .join(Tenant, Tenant.id == TransactionAllocation.tenant_id)
+        .join(Apartment, Apartment.id == Tenant.apartment_id)
+        .join(Transaction, Transaction.id == TransactionAllocation.transaction_id)
         .filter(
-            BankStatement.period_month == month,
-            BankStatement.period_year == year,
+            TransactionAllocation.period_month == month,
+            TransactionAllocation.period_year == year,
+            Apartment.building_id.in_(building_ids),
             Transaction.transaction_type == TransactionType.PAYMENT,
-            Transaction.matched_tenant_id != None,
-            Transaction.credit_amount != None,
+            TransactionAllocation.tenant_id != None,
             Tenant.is_active == True,
         )
-        .group_by(Building.id, Transaction.matched_tenant_id)
+        .group_by(Apartment.building_id, TransactionAllocation.tenant_id)
         .all()
     )
 
-    # Get expected payment per tenant (for partial detection)
+    # Expected payment per tenant
     expected_rows = (
         db.query(
             Tenant.id.label("tenant_id"),
@@ -99,18 +104,21 @@ def get_bulk_payment_summary(
         .all()
     )
     expected_by_tenant: dict = {}
+    expected_by_building: dict = {}
     for row in expected_rows:
         tid = str(row.tenant_id)
+        bid = str(row.building_id)
         apt_exp = float(row.apt_expected) if row.apt_expected is not None else None
         bld_def = float(row.building_default) if row.building_default is not None else 0.0
-        expected_by_tenant[tid] = apt_exp if apt_exp is not None else bld_def
+        per_tenant = apt_exp if apt_exp is not None else bld_def
+        expected_by_tenant[tid] = per_tenant
+        expected_by_building[bid] = expected_by_building.get(bid, 0.0) + per_tenant
 
-    # Aggregate per building: amount paid per tenant
-    paid_amounts_by_building: dict = {}   # bid -> {tid: amount}
+    paid_amounts_by_building: dict = {}
     collected_by_building: dict = {}
     for row in paid_rows:
         bid = str(row.building_id)
-        tid = str(row.matched_tenant_id)
+        tid = str(row.tenant_id)
         amount = float(row.total_paid or 0)
         if bid not in paid_amounts_by_building:
             paid_amounts_by_building[bid] = {}
@@ -118,7 +126,6 @@ def get_bulk_payment_summary(
         paid_amounts_by_building[bid][tid] = paid_amounts_by_building[bid].get(tid, 0.0) + amount
         collected_by_building[bid] += amount
 
-    # Build result
     result = []
     for building in buildings:
         bid = str(building.id)
@@ -136,7 +143,6 @@ def get_bulk_payment_summary(
                 else:
                     partial += 1
             else:
-                # No expected amount: any payment counts as full
                 if amount > 0:
                     fully_paid += 1
 
@@ -151,6 +157,143 @@ def get_bulk_payment_summary(
             "total_tenants": total,
             "collection_rate": collection_rate,
             "total_collected": collected,
+            "total_expected": round(expected_by_building.get(bid, 0.0), 2),
+        })
+
+    return result
+
+
+def _build_month_list(months: int) -> List[tuple]:
+    """Return [(year, month), ...] for `months` periods ending with current month, ascending."""
+    from datetime import datetime as dt
+    now = dt.now()
+    out = []
+    y, m = now.year, now.month
+    for _ in range(months):
+        out.append((y, m))
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    return list(reversed(out))
+
+
+@router.get("/portfolio-trend")
+def get_portfolio_trend(
+    months: int = 13,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
+):
+    """
+    Multi-month portfolio collection trend, in one round trip.
+
+    Returns one entry per period (oldest → newest), with portfolio totals and
+    a per-building breakdown. Default 13 periods (12 months back + current).
+    """
+    if months < 1 or months > 36:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="months must be between 1 and 36",
+        )
+
+    buildings = db.query(Building).all()
+    if not buildings:
+        return []
+
+    building_ids = [b.id for b in buildings]
+    building_name = {str(b.id): b.name for b in buildings}
+
+    month_list = _build_month_list(months)
+
+    # ---- expected per (building, tenant) — constant across periods in current model ----
+    expected_rows = (
+        db.query(
+            Tenant.id.label("tenant_id"),
+            Apartment.building_id.label("building_id"),
+            Apartment.expected_payment.label("apt_expected"),
+            Building.expected_monthly_payment.label("building_default"),
+        )
+        .join(Apartment, Tenant.apartment_id == Apartment.id)
+        .join(Building, Apartment.building_id == Building.id)
+        .filter(
+            Apartment.building_id.in_(building_ids),
+            Tenant.is_active == True,
+        )
+        .all()
+    )
+    expected_by_building: dict = {}
+    for r in expected_rows:
+        bid = str(r.building_id)
+        apt_exp = float(r.apt_expected) if r.apt_expected is not None else None
+        bld_def = float(r.building_default) if r.building_default is not None else 0.0
+        expected_by_building[bid] = expected_by_building.get(bid, 0.0) + (
+            apt_exp if apt_exp is not None else bld_def
+        )
+
+    # ---- collected per (year, month, building) — single grouped query ----
+    period_pairs = [(y, m) for (y, m) in month_list]
+    collected_rows = (
+        db.query(
+            TransactionAllocation.period_year.label("year"),
+            TransactionAllocation.period_month.label("month"),
+            Apartment.building_id.label("building_id"),
+            func.sum(TransactionAllocation.amount).label("collected"),
+        )
+        .join(Tenant, Tenant.id == TransactionAllocation.tenant_id)
+        .join(Apartment, Apartment.id == Tenant.apartment_id)
+        .join(Transaction, Transaction.id == TransactionAllocation.transaction_id)
+        .filter(
+            Apartment.building_id.in_(building_ids),
+            Transaction.transaction_type == TransactionType.PAYMENT,
+            TransactionAllocation.tenant_id != None,
+            Tenant.is_active == True,
+            # Tuple-IN over (year, month) pairs — PostgreSQL supports row-tuple IN:
+            tuple_(
+                TransactionAllocation.period_year,
+                TransactionAllocation.period_month,
+            ).in_(period_pairs),
+        )
+        .group_by(
+            TransactionAllocation.period_year,
+            TransactionAllocation.period_month,
+            Apartment.building_id,
+        )
+        .all()
+    )
+
+    # collected_by[(year, month)][building_id] = float
+    collected_by: dict = defaultdict(lambda: defaultdict(float))
+    for r in collected_rows:
+        collected_by[(int(r.year), int(r.month))][str(r.building_id)] = float(r.collected or 0)
+
+    # ---- pivot ----
+    result = []
+    for (y, m) in month_list:
+        per_building_payload = []
+        portfolio_collected = 0.0
+        portfolio_expected = 0.0
+        for b in buildings:
+            bid = str(b.id)
+            collected = collected_by.get((y, m), {}).get(bid, 0.0)
+            expected = expected_by_building.get(bid, 0.0)
+            rate = round((collected / expected * 100), 2) if expected > 0 else 0.0
+            per_building_payload.append({
+                "building_id": bid,
+                "name": building_name[bid],
+                "collected": round(collected, 2),
+                "expected": round(expected, 2),
+                "rate": rate,
+            })
+            portfolio_collected += collected
+            portfolio_expected += expected
+
+        result.append({
+            "period": f"{y:04d}-{m:02d}",
+            "month": m,
+            "year": y,
+            "portfolio_collected": round(portfolio_collected, 2),
+            "portfolio_expected": round(portfolio_expected, 2),
+            "buildings": per_building_payload,
         })
 
     return result
@@ -186,7 +329,6 @@ def _calculate_tenant_debt_from_map(
     return round(total_debt, 2)
 
 
-
 class ManualPaymentRequest(BaseModel):
     building_id: str
     tenant_id: str
@@ -207,12 +349,10 @@ def create_manual_payment(
     Creates a Transaction with is_manual=True and statement_id=None.
     """
 
-    # Validate tenant exists
     tenant = db.query(Tenant).filter(Tenant.id == payload.tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=404, detail=f"Tenant {payload.tenant_id} not found")
 
-    # Validate tenant belongs to the specified building
     apartment_check = db.query(Apartment).filter(
         Apartment.id == tenant.apartment_id,
         Apartment.building_id == payload.building_id
@@ -223,16 +363,13 @@ def create_manual_payment(
             detail="Tenant does not belong to the specified building"
         )
 
-    # Validate amount
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
 
-    # Build description
     description = "תשלום ידני"
     if payload.note:
         description += f" - {payload.note}"
 
-    # Create transaction (no statement_id — is_manual=True)
     txn = Transaction(
         statement_id=None,
         activity_date=datetime(payload.year, payload.month, 1),
@@ -248,6 +385,18 @@ def create_manual_payment(
         is_manual=True,
     )
     db.add(txn)
+    db.flush()  # populate txn.id before creating allocation
+
+    # Dual-write to transaction_allocations so allocation-based reads see this payment
+    allocation_service.upsert_single_tenant_allocation(
+        db=db,
+        transaction=txn,
+        tenant_id=tenant.id,
+        amount=Decimal(str(payload.amount)),
+        period_month=payload.month,
+        period_year=payload.year,
+    )
+
     db.commit()
     db.refresh(txn)
 
@@ -263,7 +412,6 @@ def create_manual_payment(
     }
 
 
-
 @router.get("/tenant/{tenant_id}/history")
 def get_tenant_payment_history(
     tenant_id: str,
@@ -272,7 +420,7 @@ def get_tenant_payment_history(
 ):
     """
     Return month-by-month payment history for a tenant from move_in_date to current month.
-    Each month includes summary + individual transactions (bank-statement and manual).
+    Amounts reflect the tenant's allocation share (correct for splits).
     """
 
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
@@ -290,7 +438,6 @@ def get_tenant_payment_history(
     move_in = tenant.move_in_date or date(2026, 1, 1)
     today = date.today()
 
-    # Generate list of all months from move_in to today
     months_list = []
     y, m = move_in.year, move_in.month
     while (y, m) <= (today.year, today.month):
@@ -300,42 +447,46 @@ def get_tenant_payment_history(
             m = 1
             y += 1
 
-    # Get ALL transactions for this tenant (bank + manual) using outerjoin
-    all_transactions = (
-        db.query(Transaction, BankStatement)
-        .outerjoin(BankStatement, Transaction.statement_id == BankStatement.id)
+    # Query allocations for this tenant — use allocation's own period fields
+    alloc_rows = (
+        db.query(TransactionAllocation, Transaction)
+        .join(Transaction, Transaction.id == TransactionAllocation.transaction_id)
         .filter(
-            Transaction.matched_tenant_id == tenant.id,
+            TransactionAllocation.tenant_id == tenant.id,
             Transaction.transaction_type == TransactionType.PAYMENT,
         )
         .order_by(Transaction.activity_date.asc())
         .all()
     )
 
-    # Group transactions by (year, month)
     txns_by_month: dict = {}
-    for txn, stmt in all_transactions:
-        if stmt is not None:
-            key = (stmt.period_year, stmt.period_month)
+    for alloc, txn in alloc_rows:
+        if alloc.period_month is not None and alloc.period_year is not None:
+            key = (alloc.period_year, alloc.period_month)
         else:
-            # manual transaction: derive period from activity_date
             act_date = txn.activity_date
             if hasattr(act_date, "date"):
                 act_date = act_date.date()
             key = (act_date.year, act_date.month)
+
         if key not in txns_by_month:
             txns_by_month[key] = []
+
         act = txn.activity_date
         date_str = act.date().isoformat() if hasattr(act, "date") else str(act)[:10]
+        headline = float(txn.credit_amount or 0)
+        alloc_amount = float(alloc.amount)
+        is_split = abs(alloc_amount - headline) > 0.01 and headline > 0
+
         txns_by_month[key].append({
             "id": str(txn.id),
             "date": date_str,
-            "amount": float(txn.credit_amount or 0),
+            "amount": alloc_amount,
             "description": txn.description,
             "is_manual": bool(txn.is_manual),
+            "is_split": is_split,
         })
 
-    # Build month-by-month summary
     result_months = []
     for (y, m) in months_list:
         month_txns = txns_by_month.get((y, m), [])
@@ -386,7 +537,6 @@ def get_tenant_debts(
     if not building:
         raise HTTPException(status_code=404, detail="Building not found")
 
-    # All active tenants with apartments
     tenants_query = (
         db.query(Tenant, Apartment)
         .join(Apartment, Tenant.apartment_id == Apartment.id)
@@ -403,29 +553,27 @@ def get_tenant_debts(
     tenant_ids = [t.id for t, _ in tenants_query]
     today = date.today()
 
-    # Batch-fetch ALL historical payment transactions for this building's tenants
-    all_txns = (
-        db.query(Transaction, BankStatement)
-        .outerjoin(BankStatement, Transaction.statement_id == BankStatement.id)
+    # Use allocations as source of truth for amounts
+    alloc_rows = (
+        db.query(TransactionAllocation, Transaction)
+        .join(Transaction, Transaction.id == TransactionAllocation.transaction_id)
         .filter(
-            Transaction.matched_tenant_id.in_(tenant_ids),
+            TransactionAllocation.tenant_id.in_(tenant_ids),
             Transaction.transaction_type == TransactionType.PAYMENT,
-            Transaction.credit_amount.isnot(None),
         )
         .all()
     )
 
-    # Group by tenant_id → {(year, month) → total_paid}
-    historical = defaultdict(lambda: defaultdict(float))
-    for txn, stmt in all_txns:
-        if stmt is not None:
-            key = (stmt.period_year, stmt.period_month)
+    historical: dict = defaultdict(lambda: defaultdict(float))
+    for alloc, txn in alloc_rows:
+        if alloc.period_month is not None and alloc.period_year is not None:
+            key = (alloc.period_year, alloc.period_month)
         else:
             act_date = txn.activity_date
             if hasattr(act_date, "date"):
                 act_date = act_date.date()
             key = (act_date.year, act_date.month)
-        historical[str(txn.matched_tenant_id)][key] += float(txn.credit_amount or 0)
+        historical[str(alloc.tenant_id)][key] += float(alloc.amount)
 
     result = {}
     for tenant, apartment in tenants_query:
@@ -436,6 +584,7 @@ def get_tenant_debts(
         )
 
     return result
+
 
 @router.get("/{building_id}/status")
 def get_payment_status(
@@ -448,8 +597,8 @@ def get_payment_status(
     """
     Get payment status for all tenants in a building for a specific period.
     If month/year not specified, uses the latest bank statement period.
+    Amounts are read through transaction_allocations (supports splits).
     """
-    # Verify building exists
     building = db.query(Building).filter(Building.id == building_id).first()
     if not building:
         raise HTTPException(
@@ -457,7 +606,6 @@ def get_payment_status(
             detail=f"Building with id {building_id} not found"
         )
 
-    # If no period specified, get the latest statement period
     if not month or not year:
         latest_statement = db.query(BankStatement).filter(
             BankStatement.building_id == building_id
@@ -467,7 +615,6 @@ def get_payment_status(
         ).first()
 
         if not latest_statement:
-            # No bank statements yet - return empty payment data with current period
             now = datetime.now()
             return {
                 "building_id": str(building_id),
@@ -488,68 +635,53 @@ def get_payment_status(
         month = latest_statement.period_month
         year = latest_statement.period_year
 
-    # Get all active tenants with their apartments
     tenants_query = db.query(Tenant, Apartment).join(Apartment).filter(
         Apartment.building_id == building_id,
         Tenant.is_active == True
     ).all()
 
-    # Get tenant IDs for this building to scope manual transactions
     tenant_ids_in_building = [t.id for t, _ in tenants_query]
 
-    # Pre-fetch ALL historical transactions for debt calculation (single batch query)
-    all_historical_txns = (
-        db.query(Transaction, BankStatement)
-        .outerjoin(BankStatement, Transaction.statement_id == BankStatement.id)
+    # Historical allocations for debt calculation — group by allocation's own period fields
+    all_historical_allocs = (
+        db.query(TransactionAllocation, Transaction)
+        .join(Transaction, Transaction.id == TransactionAllocation.transaction_id)
         .filter(
-            Transaction.matched_tenant_id.in_(tenant_ids_in_building),
+            TransactionAllocation.tenant_id.in_(tenant_ids_in_building),
             Transaction.transaction_type == TransactionType.PAYMENT,
-            Transaction.credit_amount != None,
         )
         .all()
     )
-    # Group by (tenant_id -> {(year, month) -> total_paid})
+
     historical_paid_by_tenant: dict = defaultdict(lambda: defaultdict(float))
-    for txn, stmt in all_historical_txns:
-        if stmt is not None:
-            period_key = (stmt.period_year, stmt.period_month)
+    for alloc, txn in all_historical_allocs:
+        if alloc.period_month is not None and alloc.period_year is not None:
+            period_key = (alloc.period_year, alloc.period_month)
         else:
             period_key = (txn.activity_date.year, txn.activity_date.month)
-        historical_paid_by_tenant[str(txn.matched_tenant_id)][period_key] += float(txn.credit_amount or 0)
+        historical_paid_by_tenant[str(alloc.tenant_id)][period_key] += float(alloc.amount)
 
-    # Get all transactions for this period (including manual transactions)
-    transactions = (
-        db.query(Transaction)
-        .outerjoin(BankStatement, Transaction.statement_id == BankStatement.id)
+    # Current-period allocations — filter by allocation's period fields directly
+    current_period_allocs = (
+        db.query(TransactionAllocation, Transaction)
+        .join(Transaction, Transaction.id == TransactionAllocation.transaction_id)
         .filter(
             Transaction.transaction_type == TransactionType.PAYMENT,
-            Transaction.matched_tenant_id.in_(tenant_ids_in_building),
-            or_(
-                and_(
-                    BankStatement.period_month == month,
-                    BankStatement.period_year == year,
-                    BankStatement.building_id == building_id,
-                ),
-                and_(
-                    Transaction.is_manual == True,
-                    func.extract('month', Transaction.activity_date) == month,
-                    func.extract('year', Transaction.activity_date) == year,
-                )
-            )
+            TransactionAllocation.tenant_id.in_(tenant_ids_in_building),
+            TransactionAllocation.period_month == month,
+            TransactionAllocation.period_year == year,
         )
         .all()
     )
 
-    # Create a map of tenant_id -> total paid
-    payments_by_tenant = {}
-    for trans in transactions:
-        if trans.matched_tenant_id and trans.credit_amount:
-            tenant_id = str(trans.matched_tenant_id)
-            if tenant_id not in payments_by_tenant:
-                payments_by_tenant[tenant_id] = 0
-            payments_by_tenant[tenant_id] += float(trans.credit_amount)
+    payments_by_tenant: dict = {}
+    for alloc, txn in current_period_allocs:
+        if alloc.tenant_id:
+            tid = str(alloc.tenant_id)
+            if tid not in payments_by_tenant:
+                payments_by_tenant[tid] = 0
+            payments_by_tenant[tid] += float(alloc.amount)
 
-    # Build status for each tenant
     tenant_statuses = []
     total_expected = 0
     total_collected = 0
@@ -560,17 +692,14 @@ def get_payment_status(
     for tenant, apartment in tenants_query:
         tenant_id = str(tenant.id)
 
-        # Get expected payment amount
         expected = apartment.expected_payment or building.expected_monthly_payment
         if expected:
             expected = float(expected)
         else:
             expected = 0
 
-        # Get actual payment
         paid = payments_by_tenant.get(tenant_id, 0)
 
-        # Calculate status
         is_paid = paid >= expected if expected > 0 else paid > 0
         is_partial = (not is_paid) and paid > 0
         difference = paid - expected
@@ -614,7 +743,6 @@ def get_payment_status(
             ),
         })
 
-    # Sort by apartment number
     tenant_statuses.sort(key=lambda x: x['apartment_number'])
 
     return {
@@ -644,10 +772,8 @@ def get_unpaid_tenants(
     _: User = Depends(require_viewer_plus),
 ):
     """Get list of tenants who haven't paid for a specific period"""
-    # Get full payment status
     status_data = get_payment_status(building_id, month, year, db)
 
-    # Filter for unpaid only
     unpaid_tenants = [
         t for t in status_data['tenants']
         if t['status'] == 'unpaid'
@@ -670,7 +796,6 @@ def get_payment_history(
     _: User = Depends(require_viewer_plus),
 ):
     """Get payment history for the last N months"""
-    # Verify building exists
     building = db.query(Building).filter(Building.id == building_id).first()
     if not building:
         raise HTTPException(
@@ -678,7 +803,6 @@ def get_payment_history(
             detail=f"Building with id {building_id} not found"
         )
 
-    # Get all statements for this building
     statements = db.query(BankStatement).filter(
         BankStatement.building_id == building_id
     ).order_by(
@@ -688,14 +812,18 @@ def get_payment_history(
 
     history = []
     for statement in statements:
-        # Get payment count for this statement
-        payment_count = db.query(Transaction).filter(
-            Transaction.statement_id == statement.id,
-            Transaction.transaction_type == TransactionType.PAYMENT,
-            Transaction.matched_tenant_id != None
-        ).count()
+        # Count transactions that have at least one allocation (or are directly matched)
+        # This is correct for both split and single-tenant transactions.
+        payment_count = (
+            db.query(func.count(func.distinct(Transaction.id)))
+            .join(TransactionAllocation, TransactionAllocation.transaction_id == Transaction.id)
+            .filter(
+                Transaction.statement_id == statement.id,
+                Transaction.transaction_type == TransactionType.PAYMENT,
+            )
+            .scalar()
+        ) or 0
 
-        # Get total amount
         total_amount = db.query(func.sum(Transaction.credit_amount)).filter(
             Transaction.statement_id == statement.id,
             Transaction.transaction_type == TransactionType.PAYMENT
@@ -713,4 +841,302 @@ def get_payment_history(
         "building_id": str(building_id),
         "building_name": building.name,
         "history": history
+    }
+
+
+# ----------------------------------------------------------------------------
+# Summary stats — single round-trip backing the building-detail "Summary" tab.
+# ----------------------------------------------------------------------------
+
+def _parse_period_str(p: str, field: str) -> tuple[int, int]:
+    try:
+        y_str, m_str = p.split("-")
+        y, m = int(y_str), int(m_str)
+        if not (1 <= m <= 12) or y < 1900 or y > 2999:
+            raise ValueError
+        return y, m
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field} must be in YYYY-MM format",
+        )
+
+
+def _months_inclusive(from_y: int, from_m: int, to_y: int, to_m: int) -> List[tuple]:
+    out = []
+    y, m = from_y, from_m
+    while (y, m) <= (to_y, to_m):
+        out.append((y, m))
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return out
+
+
+@router.get("/{building_id}/summary-stats")
+def get_summary_stats(
+    building_id: UUID,
+    from_: str = Query(..., alias="from"),
+    to: str = Query(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
+):
+    """
+    One-shot KPI + trend + expenses + debt-aging + worst-payers payload for
+    the Summary tab.
+
+    Range params are inclusive `YYYY-MM`, capped at 24 months.
+    """
+    from datetime import date as _date
+
+    building = db.query(Building).filter(Building.id == building_id).first()
+    if not building:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Building with id {building_id} not found",
+        )
+
+    from_y, from_m = _parse_period_str(from_, "from")
+    to_y, to_m = _parse_period_str(to, "to")
+    if (from_y, from_m) > (to_y, to_m):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="`from` must be <= `to`",
+        )
+    months = _months_inclusive(from_y, from_m, to_y, to_m)
+    if len(months) > 24:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Range cannot exceed 24 months",
+        )
+
+    # --- expected per tenant (constant across periods in current model) ----
+    tenant_rows = (
+        db.query(
+            Tenant.id.label("tenant_id"),
+            Tenant.name.label("name"),
+            Apartment.number.label("apt_number"),
+            Apartment.expected_payment.label("apt_expected"),
+            Building.expected_monthly_payment.label("building_default"),
+            Tenant.move_in_date.label("move_in_date"),
+        )
+        .join(Apartment, Tenant.apartment_id == Apartment.id)
+        .join(Building, Apartment.building_id == Building.id)
+        .filter(
+            Apartment.building_id == building_id,
+            Tenant.is_active == True,
+        )
+        .all()
+    )
+    tenant_meta: dict = {}
+    for r in tenant_rows:
+        apt_exp = float(r.apt_expected) if r.apt_expected is not None else None
+        bld_def = float(r.building_default) if r.building_default is not None else 0.0
+        tenant_meta[str(r.tenant_id)] = {
+            "name": r.name,
+            "apt_number": int(r.apt_number) if r.apt_number is not None else 0,
+            "expected": apt_exp if apt_exp is not None else bld_def,
+            "move_in_date": r.move_in_date,
+        }
+
+    expected_per_month = sum(t["expected"] for t in tenant_meta.values())
+
+    # --- collected per (year, month) and per tenant ---
+    coll_rows = (
+        db.query(
+            TransactionAllocation.period_year.label("year"),
+            TransactionAllocation.period_month.label("month"),
+            TransactionAllocation.tenant_id.label("tenant_id"),
+            func.sum(TransactionAllocation.amount).label("amt"),
+        )
+        .join(Tenant, Tenant.id == TransactionAllocation.tenant_id)
+        .join(Apartment, Apartment.id == Tenant.apartment_id)
+        .join(Transaction, Transaction.id == TransactionAllocation.transaction_id)
+        .filter(
+            Apartment.building_id == building_id,
+            Transaction.transaction_type == TransactionType.PAYMENT,
+            TransactionAllocation.tenant_id.isnot(None),
+            Tenant.is_active == True,
+            tuple_(
+                TransactionAllocation.period_year,
+                TransactionAllocation.period_month,
+            ).in_(months),
+        )
+        .group_by(
+            TransactionAllocation.period_year,
+            TransactionAllocation.period_month,
+            TransactionAllocation.tenant_id,
+        )
+        .all()
+    )
+    collected_by_month: dict = defaultdict(float)
+    collected_by_tenant: dict = defaultdict(float)
+    for r in coll_rows:
+        amt = float(r.amt or 0)
+        collected_by_month[(int(r.year), int(r.month))] += amt
+        collected_by_tenant[str(r.tenant_id)] += amt
+
+    # --- trend per month + avg_collection_rate ---
+    rate_samples: List[float] = []
+    trend = []
+    for (y, m) in months:
+        coll = collected_by_month.get((y, m), 0.0)
+        rate = round((coll / expected_per_month * 100), 2) if expected_per_month > 0 else 0.0
+        if expected_per_month > 0:
+            rate_samples.append(rate)
+        trend.append({
+            "period": f"{y:04d}-{m:02d}",
+            "rate": rate,
+            "collected": round(coll, 2),
+            "expected": round(expected_per_month, 2),
+        })
+    avg_collection_rate = round(sum(rate_samples) / len(rate_samples), 2) if rate_samples else 0.0
+
+    # --- open AR (most recent month: expected - collected, clamped >= 0) ---
+    last_y, last_m = months[-1]
+    last_collected = collected_by_month.get((last_y, last_m), 0.0)
+    open_ar = round(max(0.0, expected_per_month - last_collected), 2)
+
+    # --- expense allocations in range, joined to category ----
+    exp_rows = (
+        db.query(
+            TransactionAllocation.id.label("alloc_id"),
+            TransactionAllocation.amount.label("amount"),
+            TransactionAllocation.category_id.label("category_id"),
+            ExpenseCategory.name.label("category_name"),
+            ExpenseCategory.color.label("category_color"),
+            Transaction.activity_date.label("activity_date"),
+            TransactionAllocation.period_year.label("year"),
+            TransactionAllocation.period_month.label("month"),
+        )
+        .join(Transaction, Transaction.id == TransactionAllocation.transaction_id)
+        .join(BankStatement, BankStatement.id == Transaction.statement_id)
+        .outerjoin(ExpenseCategory, ExpenseCategory.id == TransactionAllocation.category_id)
+        .filter(
+            BankStatement.building_id == building_id,
+            TransactionAllocation.tenant_id.is_(None),
+            TransactionAllocation.label.isnot(None),
+            tuple_(
+                TransactionAllocation.period_year,
+                TransactionAllocation.period_month,
+            ).in_(months),
+        )
+        .all()
+    )
+    expenses_total = 0.0
+    by_cat: dict = {}
+    for r in exp_rows:
+        amt = float(r.amount or 0)
+        expenses_total += amt
+        key = str(r.category_id) if r.category_id else None
+        if key not in by_cat:
+            by_cat[key] = {
+                "category_id": str(r.category_id) if r.category_id else None,
+                "name": r.category_name if r.category_name else "לא מסווג",
+                "color": r.category_color if r.category_color else "#9CA3AF",
+                "amount": 0.0,
+            }
+        by_cat[key]["amount"] += amt
+    expenses_by_category = sorted(
+        ({**v, "amount": round(v["amount"], 2)} for v in by_cat.values()),
+        key=lambda x: x["amount"],
+        reverse=True,
+    )
+
+    # --- debt aging — based on PAYMENT allocations' (activity_date - period_start) ---
+    paid_alloc_rows = (
+        db.query(
+            Transaction.activity_date.label("activity_date"),
+            TransactionAllocation.period_year.label("year"),
+            TransactionAllocation.period_month.label("month"),
+        )
+        .join(Tenant, Tenant.id == TransactionAllocation.tenant_id)
+        .join(Apartment, Apartment.id == Tenant.apartment_id)
+        .join(Transaction, Transaction.id == TransactionAllocation.transaction_id)
+        .filter(
+            Apartment.building_id == building_id,
+            Transaction.transaction_type == TransactionType.PAYMENT,
+            TransactionAllocation.tenant_id.isnot(None),
+            Tenant.is_active == True,
+            tuple_(
+                TransactionAllocation.period_year,
+                TransactionAllocation.period_month,
+            ).in_(months),
+        )
+        .all()
+    )
+    aging = {"0-7": 0, "8-30": 0, "31-60": 0, "60+": 0, "unpaid": 0}
+    days_samples: List[int] = []
+    for r in paid_alloc_rows:
+        if r.activity_date is None or r.year is None or r.month is None:
+            continue
+        period_start = _date(int(r.year), int(r.month), 1)
+        ad = r.activity_date.date() if isinstance(r.activity_date, datetime) else r.activity_date
+        delta = max(0, (ad - period_start).days)
+        days_samples.append(delta)
+        if delta <= 7:
+            aging["0-7"] += 1
+        elif delta <= 30:
+            aging["8-30"] += 1
+        elif delta <= 60:
+            aging["31-60"] += 1
+        else:
+            aging["60+"] += 1
+
+    avg_days_to_pay = round(sum(days_samples) / len(days_samples), 1) if days_samples else 0.0
+
+    # Unpaid count = (tenant, period) pairs where tenant was active in that period and no allocation exists.
+    paid_pairs = {
+        (str(r.tenant_id), int(r.year), int(r.month))
+        for r in coll_rows
+    }
+    unpaid_count = 0
+    for tid, meta in tenant_meta.items():
+        move_in = meta.get("move_in_date")
+        for (y, m) in months:
+            if move_in and (move_in.year, move_in.month) > (y, m):
+                continue
+            if (tid, y, m) not in paid_pairs:
+                unpaid_count += 1
+    aging["unpaid"] = unpaid_count
+
+    # --- worst payers — top 5 by (expected_total_in_range - collected) ---
+    worst = []
+    for tid, meta in tenant_meta.items():
+        move_in = meta.get("move_in_date")
+        active_months = 0
+        for (y, m) in months:
+            if move_in and (move_in.year, move_in.month) > (y, m):
+                continue
+            active_months += 1
+        expected_total = meta["expected"] * active_months
+        collected = collected_by_tenant.get(tid, 0.0)
+        debt = max(0.0, expected_total - collected)
+        rate = round((collected / expected_total * 100), 1) if expected_total > 0 else 0.0
+        worst.append({
+            "tenant_id": tid,
+            "name": meta["name"],
+            "apartment_number": meta["apt_number"],
+            "rate": rate,
+            "debt": round(debt, 2),
+        })
+    worst.sort(key=lambda x: x["debt"], reverse=True)
+    worst_payers = [w for w in worst if w["debt"] > 0][:5]
+
+    # --- income (sum of allocations to tenants in range) ---
+    income_total = sum(collected_by_tenant.values())
+
+    return {
+        "kpis": {
+            "avg_collection_rate": avg_collection_rate,
+            "open_ar": open_ar,
+            "avg_days_to_pay": avg_days_to_pay,
+            "income": round(income_total, 2),
+            "expenses": round(expenses_total, 2),
+        },
+        "trend": trend,
+        "expenses_by_category": expenses_by_category,
+        "debt_aging": aging,
+        "worst_payers": worst_payers,
     }
