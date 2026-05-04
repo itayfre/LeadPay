@@ -1,4 +1,4 @@
-import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, BankStatement, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview, Allocation, SetAllocationsRequest } from '../types';
+import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, BankStatement, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview, Allocation, SetAllocationsRequest, PortfolioTrendMonth, BuildingSummaryStats, ExpenseCategory, Expense, UploadResult } from '../types';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -144,6 +144,58 @@ export const paymentsAPI = {
 
   getTenantDebts: (buildingId: string) =>
     fetchAPI<Record<string, number>>(`/api/v1/payments/${buildingId}/tenant-debts`),
+
+  // Stage 1 additions
+  getPortfolioTrend: (months = 13) =>
+    fetchAPI<PortfolioTrendMonth[]>(`/api/v1/payments/portfolio-trend?months=${months}`),
+
+  getSummaryStats: (buildingId: string, from: string, to: string) =>
+    fetchAPI<BuildingSummaryStats>(
+      `/api/v1/payments/${buildingId}/summary-stats?from=${from}&to=${to}`
+    ),
+};
+
+// Expenses API (Stage 1)
+export const expensesAPI = {
+  listCategories: (buildingId: string) =>
+    fetchAPI<ExpenseCategory[]>(`/api/v1/expenses/${buildingId}/categories/`),
+
+  createCategory: (buildingId: string, data: { name: string; color?: string }) =>
+    fetchAPI<ExpenseCategory>(
+      `/api/v1/expenses/${buildingId}/categories/`,
+      { method: 'POST', body: JSON.stringify(data) }
+    ),
+
+  patchCategory: (categoryId: string, data: Partial<{ name: string; color: string }>) =>
+    fetchAPI<ExpenseCategory>(
+      `/api/v1/expenses/categories/${categoryId}`,
+      { method: 'PATCH', body: JSON.stringify(data) }
+    ),
+
+  deleteCategory: (categoryId: string) =>
+    fetchAPI<void>(`/api/v1/expenses/categories/${categoryId}`, { method: 'DELETE' }),
+
+  list: (buildingId: string, from: string, to: string) =>
+    fetchAPI<Expense[]>(`/api/v1/expenses/${buildingId}/?from=${from}&to=${to}`),
+
+  setCategory: (transactionId: string, categoryId: string | null) =>
+    fetchAPI<Expense>(
+      `/api/v1/expenses/transactions/${transactionId}/category`,
+      { method: 'PATCH', body: JSON.stringify({ category_id: categoryId }) }
+    ),
+
+  bulkCategorize: (
+    buildingId: string,
+    transactionIds: string[],
+    categoryId: string | null
+  ) =>
+    fetchAPI<{ updated: number }>(
+      `/api/v1/expenses/${buildingId}/bulk-categorize`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ transaction_ids: transactionIds, category_id: categoryId }),
+      }
+    ),
 };
 
 // Statements API
@@ -151,7 +203,7 @@ export const statementsAPI = {
   upload: (buildingId: string, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    return fetchAPI<any>(`/api/v1/statements/${buildingId}/upload`, { method: 'POST', body: formData });
+    return fetchAPI<UploadResult>(`/api/v1/statements/${buildingId}/upload`, { method: 'POST', body: formData });
   },
 
   list: (buildingId: string) =>

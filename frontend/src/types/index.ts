@@ -21,6 +21,79 @@ export interface BuildingPaymentSummary {
   total_tenants: number;
   collection_rate: number;      // 0–100
   total_collected: number;
+  total_expected?: number;       // sum of active tenants' expected payments for the period
+}
+
+// ---- Stage 1 backend additions ----
+
+export interface PortfolioTrendBuilding {
+  building_id: string;
+  name: string;
+  collected: number;
+  expected: number;
+  rate: number;                  // 0–100+ (can exceed 100% on overpayment)
+}
+
+export interface PortfolioTrendMonth {
+  period: string;                // 'YYYY-MM'
+  month: number;                 // 1–12
+  year: number;
+  portfolio_collected: number;
+  portfolio_expected: number;
+  buildings: PortfolioTrendBuilding[];
+}
+
+export interface ExpenseCategory {
+  id: string;
+  building_id: string;
+  name: string;
+  color: string;                 // '#RRGGBB'
+  is_default: boolean;
+  is_active: boolean;
+}
+
+// New per-building expense row (distinct from the upload-review `ExpenseRow` above).
+export interface Expense {
+  transaction_id: string;
+  allocation_id: string;
+  date: string;                  // 'YYYY-MM-DD'
+  amount: number;
+  description: string;
+  vendor_label: string | null;
+  category_id: string | null;
+  category_name: string | null;
+  category_color: string | null;
+}
+
+export interface BuildingSummaryStats {
+  kpis: {
+    avg_collection_rate: number;
+    open_ar: number;
+    avg_days_to_pay: number;
+    income: number;
+    expenses: number;
+  };
+  trend: { period: string; rate: number; collected: number; expected: number }[];
+  expenses_by_category: {
+    category_id: string | null;
+    name: string;
+    color: string;
+    amount: number;
+  }[];
+  debt_aging: {
+    '0-7': number;
+    '8-30': number;
+    '31-60': number;
+    '60+': number;
+    unpaid: number;
+  };
+  worst_payers: {
+    tenant_id: string;
+    name: string;
+    apartment_number: number;
+    rate: number;
+    debt: number;
+  }[];
 }
 
 export interface Tenant {
@@ -243,3 +316,15 @@ export interface SetAllocationsRequest {
 }
 
 export type AllocationMode = 'split' | 'multi_month' | 'non_tenant';
+
+export interface UploadResult {
+  statement_id: string;
+  period: string;
+  total_transactions: number;
+  payment_transactions: number;
+  matched: number;
+  unmatched: number;
+  skipped_duplicates: number;
+  match_rate: string;
+  duplicate_warning?: string | null;
+}

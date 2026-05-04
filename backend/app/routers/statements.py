@@ -126,11 +126,25 @@ async def upload_bank_statement(
             detail="Failed to parse Excel file. Please check the format."
         )
 
+    # Check if a statement for this period already exists for this building
+    duplicate_warning: str | None = None
+    period_month = metadata.get('period_month')
+    period_year = metadata.get('period_year')
+    if period_month and period_year:
+        existing_stmt = db.query(BankStatement).filter(
+            BankStatement.building_id == building_id,
+            BankStatement.period_month == period_month,
+            BankStatement.period_year == period_year,
+        ).first()
+        if existing_stmt:
+            month_name = _HEBREW_MONTHS.get(period_month, str(period_month))
+            duplicate_warning = f"דף בנק לתקופה {month_name} {period_year} כבר הועלה לבניין זה."
+
     # Create bank statement record
     bank_statement = BankStatement(
         building_id=building_id,
-        period_month=metadata.get('period_month'),
-        period_year=metadata.get('period_year'),
+        period_month=period_month,
+        period_year=period_year,
         original_filename=file.filename,
         raw_data={'metadata': metadata, 'row_count': len(transactions_data)}
     )
@@ -363,7 +377,8 @@ async def upload_bank_statement(
         "skipped_duplicates": skipped_count,
         "expense_classified": expense_classified,
         "expense_unclassified": expense_unclassified,
-        "match_rate": f"{(matched_count / len(payment_transactions) * 100):.1f}%" if payment_transactions else "N/A"
+        "match_rate": f"{(matched_count / len(payment_transactions) * 100):.1f}%" if payment_transactions else "N/A",
+        "duplicate_warning": duplicate_warning,
     }
 
 

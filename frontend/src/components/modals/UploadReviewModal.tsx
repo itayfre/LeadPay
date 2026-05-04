@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { statementsAPI } from '../../services/api';
-import type { StatementReview, ReviewTransaction, MatchSuggestion, ExpenseRow } from '../../types';
+import type { StatementReview, ReviewTransaction, MatchSuggestion, ExpenseRow, UploadResult } from '../../types';
 import ConfirmDialog from './ConfirmDialog';
 import AllocationDrawer from './AllocationDrawer';
 
 interface Props {
   statementId: string;
   buildingId: string;
+  uploadResult?: UploadResult;
   onClose: () => void;
 }
 
@@ -137,7 +138,7 @@ function IconAction({ title, onClick, disabled, loading, variant, children }: Ic
   );
 }
 
-export default function UploadReviewModal({ statementId, buildingId, onClose }: Props) {
+export default function UploadReviewModal({ statementId, buildingId, uploadResult, onClose }: Props) {
   const queryClient = useQueryClient();
 
   const [review, setReview] = useState<StatementReview | null>(null);
@@ -403,6 +404,47 @@ export default function UploadReviewModal({ statementId, buildingId, onClose }: 
 
           {review && !loading && (
             <>
+              {/* Upload summary strip — only when opened right after an upload */}
+              {uploadResult && (
+                <div className="bg-gray-50 border-b border-gray-200 px-6 py-2.5 flex items-center gap-4 text-xs text-gray-600 flex-wrap">
+                  <span className="font-medium text-gray-700">📄 {uploadResult.period.replace('/', '/')}</span>
+                  <span>{uploadResult.total_transactions} עסקאות בקובץ</span>
+                  <span className="text-green-700 font-medium">✓ {uploadResult.matched} הותאמו</span>
+                  {uploadResult.unmatched > 0 && (
+                    <span className="text-orange-600 font-medium">? {uploadResult.unmatched} ממתינים לשיוך</span>
+                  )}
+                  {uploadResult.skipped_duplicates > 0 && (
+                    <span className="text-gray-400">{uploadResult.skipped_duplicates} כפולים דולגו</span>
+                  )}
+                </div>
+              )}
+
+              {/* Duplicate period warning */}
+              {uploadResult?.duplicate_warning && (
+                <div className="mx-6 mt-3 flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+                  <span className="flex-shrink-0 text-lg">⚠️</span>
+                  <div>
+                    <p className="font-semibold">דף בנק כפול</p>
+                    <p className="text-amber-700 text-xs mt-0.5">{uploadResult.duplicate_warning} ייתכן שהעלת את אותו קובץ פעמיים.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* High unmatched rate warning (>90% of payment transactions unmatched) */}
+              {uploadResult && uploadResult.payment_transactions > 0 &&
+               uploadResult.unmatched / uploadResult.payment_transactions > 0.9 && (
+                <div className="mx-6 mt-3 flex items-start gap-2 text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                  <span className="flex-shrink-0 text-lg">🔴</span>
+                  <div>
+                    <p className="font-semibold">רוב התשלומים לא זוהו — ייתכן שהעלת קובץ של בניין אחר</p>
+                    <p className="text-red-700 text-xs mt-0.5">
+                      {uploadResult.unmatched} מתוך {uploadResult.payment_transactions} תשלומים ({Math.round(uploadResult.unmatched / uploadResult.payment_transactions * 100)}%) לא הותאמו לאף דייר.
+                      אם הקובץ שייך לבניין אחר, סגור את החלון והעלה מחדש מהבניין הנכון.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Tabs */}
               <div className="border-b border-gray-200 px-6 flex gap-1 pt-2">
                 {tabs.map(tab => (

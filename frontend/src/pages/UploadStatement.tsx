@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import Layout from '../components/layout/Layout';
 import { statementsAPI } from '../services/api';
 import UploadReviewModal from '../components/modals/UploadReviewModal';
+import type { UploadResult } from '../types';
 
 export default function UploadStatement() {
   const { t } = useTranslation();
@@ -14,7 +15,7 @@ export default function UploadStatement() {
 
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [reviewStatementId, setReviewStatementId] = useState<string | null>(null);
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -65,8 +66,8 @@ export default function UploadStatement() {
       const result = await statementsAPI.upload(buildingId, file);
       // Invalidate payment status query to refresh the dashboard
       queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId] });
-      // Open the review modal
-      setReviewStatementId(result.statement_id);
+      // Open the review modal with full upload result
+      setUploadResult(result);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -155,7 +156,7 @@ export default function UploadStatement() {
         )}
 
         {/* Instructions */}
-        {!reviewStatementId && !error && (
+        {!uploadResult && !error && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
             <h3 className="font-bold text-blue-900 mb-3">💡 הוראות שימוש</h3>
             <ul className="space-y-2 text-sm text-blue-800">
@@ -181,11 +182,12 @@ export default function UploadStatement() {
       </div>
 
       {/* Review Modal — opens automatically after successful upload */}
-      {reviewStatementId && buildingId && (
+      {uploadResult && buildingId && (
         <UploadReviewModal
-          statementId={reviewStatementId}
+          statementId={uploadResult.statement_id}
           buildingId={buildingId}
-          onClose={() => setReviewStatementId(null)}
+          uploadResult={uploadResult}
+          onClose={() => setUploadResult(null)}
         />
       )}
     </Layout>
