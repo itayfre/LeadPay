@@ -1,4 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import datetime as dt
+import urllib.parse
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
@@ -12,6 +16,9 @@ from ..models.user import User
 from ..schemas import BuildingCreate, BuildingUpdate, BuildingResponse
 from ..dependencies.auth import require_manager, require_worker_plus, require_any_auth
 from ..services.expense_categories import seed_default_categories
+from ..services.report_data import build_report_payload
+from ..services.report_pdf import render_report_pdf
+from ..services.report_docx import render_report_docx
 
 router = APIRouter(
     prefix="/api/v1/buildings",
@@ -203,3 +210,87 @@ def delete_building(
     db.delete(db_building)
     db.commit()
     return None
+
+
+# ─── Report endpoints ─────────────────────────────────────────────────────────
+
+def _parse_report_period(from_: str, to: str) -> tuple[dt.date, dt.date]:
+    try:
+        f = dt.datetime.strptime(from_, "%Y-%m").date()
+        t = dt.datetime.strptime(to, "%Y-%m").date()
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="from/to must be YYYY-MM format",
+        )
+    if f > t:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="`from` must be <= `to`",
+        )
+    # Snap to month boundaries
+    last_day = (t.replace(day=28) + dt.timedelta(days=4)).replace(day=1) - dt.timedelta(days=1)
+    return f.replace(day=1), last_day
+
+
+@router.get("/{building_id}/report")
+def get_building_report(
+    building_id: UUID,
+    from_: str = Query(..., alias="from"),
+    to: str = Query(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_any_auth),
+):
+    f, t = _parse_report_period(from_, to)
+    try:
+        return build_report_payload(db, building_id, f, t)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.get("/{building_id}/report.pdf")
+def get_building_report_pdf(
+    building_id: UUID,
+    from_: str = Query(..., alias="from"),
+    to: str = Query(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_any_auth),
+):
+    f, t = _parse_report_period(from_, to)
+    try:
+        payload = build_report_payload(db, building_id, f, t)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    pdf = render_report_pdf(payload)
+    fname = urllib.parse.quote(
+        f"דוח_{payload['building']['name']}_{payload['period']['label']}.pdf"
+    )
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"},
+    )
+
+
+@router.get("/{building_id}/report.docx")
+def get_building_report_docx(
+    building_id: UUID,
+    from_: str = Query(..., alias="from"),
+    to: str = Query(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_any_auth),
+):
+    f, t = _parse_report_period(from_, to)
+    try:
+        payload = build_report_payload(db, building_id, f, t)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    doc = render_report_docx(payload)
+    fname = urllib.parse.quote(
+        f"דוח_{payload['building']['name']}_{payload['period']['label']}.docx"
+    )
+    return Response(
+        content=doc,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"},
+    )
