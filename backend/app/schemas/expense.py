@@ -8,6 +8,7 @@ class CategorizeRequest(BaseModel):
     vendor_label: str
     category: Optional[str] = None  # legacy string category (deprecated)
     category_id: Optional[UUID] = None  # preferred — FK to expense_categories
+    notes: Optional[str] = None  # free-text comment shown alongside the expense
     remember: bool = False
 
 

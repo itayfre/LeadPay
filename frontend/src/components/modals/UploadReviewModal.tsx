@@ -4,6 +4,7 @@ import { statementsAPI, expensesAPI } from '../../services/api';
 import type { StatementReview, ReviewTransaction, MatchSuggestion, ExpenseRow, UploadResult, ExpenseCategory } from '../../types';
 import ConfirmDialog from './ConfirmDialog';
 import AllocationDrawer from './AllocationDrawer';
+import CategoryManagerModal from '../building/CategoryManagerModal';
 
 interface Props {
   statementId: string;
@@ -154,16 +155,18 @@ export default function UploadReviewModal({ statementId, buildingId, uploadResul
   // Allocation drawer state — which transaction is open
   const [drawerTx, setDrawerTx] = useState<ReviewTransaction | null>(null);
 
-  // Per-building expense categories (loaded once on mount)
+  // Per-building expense categories (loaded on mount + refreshed when manager closes)
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
 
   // Expense edit popover state
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [expenseEditForm, setExpenseEditForm] = useState<{
     vendor_label: string;
     category_id: string;
+    notes: string;
     remember: boolean;
-  }>({ vendor_label: '', category_id: '', remember: false });
+  }>({ vendor_label: '', category_id: '', notes: '', remember: false });
 
   const refreshReview = async () => {
     const updated = await statementsAPI.getReview(statementId);
@@ -186,12 +189,14 @@ export default function UploadReviewModal({ statementId, buildingId, uploadResul
       .finally(() => setLoading(false));
   }, [statementId]);
 
-  // Load building categories for the expense edit dropdown
-  useEffect(() => {
+  const reloadCategories = React.useCallback(() => {
     expensesAPI.listCategories(buildingId)
       .then(setCategories)
       .catch(() => setCategories([]));
   }, [buildingId]);
+
+  // Load building categories for the expense edit dropdown
+  useEffect(() => { reloadCategories(); }, [reloadCategories]);
 
   const handleSelectTenant = (transactionId: string, tenantId: string) => {
     setPendingMatches(prev => {
@@ -319,27 +324,24 @@ export default function UploadReviewModal({ statementId, buildingId, uploadResul
 
   const openExpenseEdit = (row: ExpenseRow) => {
     setEditingExpenseId(row.id);
-    // Seed category from the row if it has one, otherwise pick the first
-    // building category (or empty string if none are loaded yet).
-    const seedCategoryId = row.category_id ?? categories[0]?.id ?? '';
     setExpenseEditForm({
       vendor_label: row.vendor_label ?? '',
-      category_id: seedCategoryId,
+      // Seed category from the row if it has one. Leave empty (= "ללא קטגוריה")
+      // when uncategorized so the user makes an explicit choice.
+      category_id: row.category_id ?? '',
+      notes: row.notes ?? '',
       remember: false,
     });
   };
 
   const handleSaveExpense = async (txId: string) => {
-    if (!expenseEditForm.category_id) {
-      setConfirmError('יש לבחור קטגוריה');
-      return;
-    }
     setBusyRow(txId);
     setConfirmError(null);
     try {
       await statementsAPI.categorizeTransaction(txId, {
         vendor_label: expenseEditForm.vendor_label,
-        category_id: expenseEditForm.category_id,
+        category_id: expenseEditForm.category_id || undefined,
+        notes: expenseEditForm.notes.trim() || undefined,
         remember: expenseEditForm.remember,
       });
       setEditingExpenseId(null);
@@ -707,6 +709,15 @@ export default function UploadReviewModal({ statementId, buildingId, uploadResul
                 {/* ── EXPENSES TAB ── */}
                 {activeTab === 'expenses' && (
                   <div>
+                    <div className="flex justify-end mb-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowCategoryManager(true)}
+                        className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 transition-colors font-medium"
+                      >
+                        ⚙️ ניהול קטגוריות
+                      </button>
+                    </div>
                     {(review.expenses?.length ?? 0) === 0 ? (
                       <div className="text-center py-12 text-gray-400">
                         <div className="text-4xl mb-2">💸</div>
@@ -789,9 +800,14 @@ export default function UploadReviewModal({ statementId, buildingId, uploadResul
                                     const dotColor = row.category_color ?? '#6366f1';
                                     return (
                                     <tr key={row.id} className="hover:bg-gray-50">
-                                      <td className="py-2.5 text-gray-500">{formatDate(row.activity_date)}</td>
-                                      <td className="py-2.5 text-gray-700 max-w-[180px] truncate" title={row.description}>
-                                        {row.description}
+                                      <td className="py-2.5 text-gray-500 align-top">{formatDate(row.activity_date)}</td>
+                                      <td className="py-2.5 text-gray-700 max-w-[180px]" title={row.description}>
+                                        <div className="truncate">{row.description}</div>
+                                        {row.notes && (
+                                          <div className="text-xs text-gray-500 italic mt-0.5 truncate" title={row.notes}>
+                                            💬 {row.notes}
+                                          </div>
+                                        )}
                                       </td>
                                       <td className="py-2.5 text-gray-800 font-medium">
                                         {row.vendor_label ?? '—'}
@@ -897,6 +913,17 @@ export default function UploadReviewModal({ statementId, buildingId, uploadResul
         onCancel={() => setPendingDeleteId(null)}
       />
 
+      {/* Category manager modal — reuses the same component as the building expenses page */}
+      {showCategoryManager && (
+        <CategoryManagerModal
+          buildingId={buildingId}
+          onClose={() => {
+            setShowCategoryManager(false);
+            reloadCategories();
+          }}
+        />
+      )}
+
       {/* Allocation drawer */}
       {drawerTx && review && (
         <AllocationDrawer
@@ -935,23 +962,41 @@ export default function UploadReviewModal({ statementId, buildingId, uploadResul
                 />
               </div>
               <div>
-                <label className="text-sm text-gray-600 block mb-1">קטגוריה</label>
-                {categories.length === 0 ? (
-                  <p className="text-xs text-gray-500 py-2">
-                    אין קטגוריות מוגדרות לבניין זה. הוסף קטגוריות בעמוד ההוצאות.
-                  </p>
-                ) : (
-                  <select
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white"
-                    value={expenseEditForm.category_id}
-                    onChange={e => setExpenseEditForm(f => ({ ...f, category_id: e.target.value }))}
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm text-gray-600">קטגוריה</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowCategoryManager(true)}
+                    className="text-xs text-indigo-600 hover:text-indigo-800 hover:underline"
                   >
-                    <option value="" disabled>בחר קטגוריה...</option>
-                    {categories.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
+                    ⚙️ ניהול קטגוריות
+                  </button>
+                </div>
+                <select
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white"
+                  value={expenseEditForm.category_id}
+                  onChange={e => setExpenseEditForm(f => ({ ...f, category_id: e.target.value }))}
+                >
+                  <option value="">ללא קטגוריה</option>
+                  {categories.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                {categories.length === 0 && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    אין קטגוריות מוגדרות. לחץ "ניהול קטגוריות" להוספה.
+                  </p>
                 )}
+              </div>
+              <div>
+                <label className="text-sm text-gray-600 block mb-1">הערות (אופציונלי)</label>
+                <textarea
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 resize-none"
+                  rows={2}
+                  value={expenseEditForm.notes}
+                  onChange={e => setExpenseEditForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="פרטים נוספים על ההוצאה..."
+                />
               </div>
               <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer pt-1">
                 <input
@@ -972,11 +1017,7 @@ export default function UploadReviewModal({ statementId, buildingId, uploadResul
               </button>
               <button
                 onClick={() => editingExpenseId && handleSaveExpense(editingExpenseId)}
-                disabled={
-                  !!busyRow ||
-                  !expenseEditForm.vendor_label ||
-                  !expenseEditForm.category_id
-                }
+                disabled={!!busyRow || !expenseEditForm.vendor_label}
                 className="px-4 py-2 text-sm text-white bg-indigo-600 hover:bg-indigo-700 rounded-md disabled:opacity-50"
               >
                 {busyRow ? '...' : 'שמור'}

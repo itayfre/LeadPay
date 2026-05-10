@@ -251,6 +251,7 @@ export const statementsAPI = {
       vendor_label: string;
       category_id?: string;       // preferred — per-building category
       category?: string;          // legacy fallback (deprecated)
+      notes?: string;             // free-text comment
       remember: boolean;
     }
   ) =>
@@ -261,6 +262,7 @@ export const statementsAPI = {
       category_id: string | null;
       category_name: string | null;
       category_color: string | null;
+      notes: string | null;
       amount: number;
     }>(
       `/api/v1/transactions/${transactionId}/categorize`,

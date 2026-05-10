@@ -278,6 +278,7 @@ export interface ExpenseRow {
   category_id: string | null;         // building-defined category FK
   category_name: string | null;       // joined display name
   category_color: string | null;      // joined display color
+  notes: string | null;               // free-text comment
   allocation_id: string | null;
 }
 

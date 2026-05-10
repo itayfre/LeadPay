@@ -482,6 +482,7 @@ def get_statement_review(
                 'category_id': cat_id,
                 'category_name': cat_name,
                 'category_color': cat_color,
+                'notes': expense_alloc.notes if expense_alloc else None,
                 'allocation_id': str(expense_alloc.id) if expense_alloc else None,
             })
             continue
@@ -931,6 +932,7 @@ def categorize_transaction(
         amount=Decimal(str(abs(transaction.debit_amount))),
         period_month=statement.period_month if statement else None,
         period_year=statement.period_year if statement else None,
+        notes=(body.notes.strip() if body.notes and body.notes.strip() else None),
     )
     db.add(alloc)
 
@@ -967,6 +969,7 @@ def categorize_transaction(
         "category_id": str(alloc.category_id) if alloc.category_id else None,
         "category_name": category_obj.name if category_obj else None,
         "category_color": category_obj.color if category_obj else None,
+        "notes": alloc.notes,
         "amount": float(alloc.amount),
     }
 
