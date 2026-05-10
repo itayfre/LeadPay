@@ -60,3 +60,7 @@ websockets==15.0.1
 wrapt==2.1.1
 xlrd==2.0.2
 lxml==5.3.0
+weasyprint==62.3
+pydyf==0.10.0
+python-docx==1.1.2
+Jinja2==3.1.4
