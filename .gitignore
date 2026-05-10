@@ -33,3 +33,6 @@ uploads/
 # Debrief reports
 Debrief/
 .vercel
+
+# Git worktrees
+.worktrees/
