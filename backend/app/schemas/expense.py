@@ -6,7 +6,8 @@ from typing import List, Optional
 
 class CategorizeRequest(BaseModel):
     vendor_label: str
-    category: str
+    category: Optional[str] = None  # legacy string category (deprecated)
+    category_id: Optional[UUID] = None  # preferred — FK to expense_categories
     remember: bool = False
 
 

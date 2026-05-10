@@ -274,7 +274,10 @@ export interface ExpenseRow {
   transaction_type: string;
   // classifier output (null if uncategorized)
   vendor_label: string | null;
-  category: string | null;
+  category: string | null;            // legacy string category (deprecated)
+  category_id: string | null;         // building-defined category FK
+  category_name: string | null;       // joined display name
+  category_color: string | null;      // joined display color
   allocation_id: string | null;
 }
 

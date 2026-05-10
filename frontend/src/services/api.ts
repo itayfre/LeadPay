@@ -247,9 +247,22 @@ export const statementsAPI = {
 
   categorizeTransaction: (
     transactionId: string,
-    payload: { vendor_label: string; category: string; remember: boolean }
+    payload: {
+      vendor_label: string;
+      category_id?: string;       // preferred — per-building category
+      category?: string;          // legacy fallback (deprecated)
+      remember: boolean;
+    }
   ) =>
-    fetchAPI<{ allocation_id: string; vendor_label: string; category: string; amount: number }>(
+    fetchAPI<{
+      allocation_id: string;
+      vendor_label: string;
+      category: string | null;
+      category_id: string | null;
+      category_name: string | null;
+      category_color: string | null;
+      amount: number;
+    }>(
       `/api/v1/transactions/${transactionId}/categorize`,
       { method: 'POST', body: JSON.stringify(payload) }
     ),

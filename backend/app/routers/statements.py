@@ -8,7 +8,7 @@ from ..database import get_db
 from ..models import (
     BankStatement, Transaction, Building, Tenant,
     Apartment, TransactionType, MatchMethod, NameMapping, MappingCreatedBy,
-    TransactionAllocation, VendorMapping,
+    TransactionAllocation, VendorMapping, ExpenseCategory,
 )
 from ..models.user import User
 from ..schemas.allocation import SetAllocationsRequest, AllocationResponse
@@ -460,13 +460,28 @@ def get_statement_review(
         if t.transaction_type == TransactionType.TRANSFER and t.debit_amount:
             # Outgoing transfer → expense row
             expense_alloc = next(
-                (a for a in (t.allocations or []) if a.tenant_id is None and a.category),
+                (a for a in (t.allocations or [])
+                 if a.tenant_id is None and (a.category or a.category_id)),
                 None,
             )
+            cat_name = None
+            cat_color = None
+            cat_id = None
+            if expense_alloc and expense_alloc.category_id:
+                cat = db.query(ExpenseCategory).filter(
+                    ExpenseCategory.id == expense_alloc.category_id
+                ).first()
+                if cat:
+                    cat_name = cat.name
+                    cat_color = cat.color
+                    cat_id = str(cat.id)
             expenses.append({
                 **base,
                 'vendor_label': expense_alloc.label if expense_alloc else None,
                 'category': expense_alloc.category if expense_alloc else None,
+                'category_id': cat_id,
+                'category_name': cat_name,
+                'category_color': cat_color,
                 'allocation_id': str(expense_alloc.id) if expense_alloc else None,
             })
             continue
@@ -867,12 +882,35 @@ def categorize_transaction(
     if not transaction.debit_amount:
         raise HTTPException(status_code=400, detail="Transaction is not a debit row")
 
-    # Validate category
+    # Get period (and building_id) from the parent bank statement.
+    statement = db.query(BankStatement).filter(
+        BankStatement.id == transaction.statement_id
+    ).first()
+
+    # Validate category — prefer category_id (per-building), fall back to legacy string.
     from ..models.transaction_allocation import ALLOCATION_CATEGORIES
-    if body.category not in ALLOCATION_CATEGORIES:
+    category_obj = None
+    if body.category_id is not None:
+        category_obj = db.query(ExpenseCategory).filter(
+            ExpenseCategory.id == body.category_id
+        ).first()
+        if not category_obj:
+            raise HTTPException(status_code=400, detail="Unknown category_id")
+        if statement and category_obj.building_id != statement.building_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Category does not belong to this building",
+            )
+    elif body.category is not None:
+        if body.category not in ALLOCATION_CATEGORIES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid category. Must be one of: {', '.join(ALLOCATION_CATEGORIES)}",
+            )
+    else:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid category. Must be one of: {', '.join(ALLOCATION_CATEGORIES)}",
+            detail="Either category_id or category is required",
         )
 
     # Remove any existing expense allocation for this transaction
@@ -884,43 +922,40 @@ def categorize_transaction(
         db.delete(existing)
         db.flush()
 
-    # Get period from the parent bank statement
-    statement = db.query(BankStatement).filter(
-        BankStatement.id == transaction.statement_id
-    ).first()
-
     alloc = TransactionAllocation(
         transaction_id=transaction_id,
         tenant_id=None,
         label=body.vendor_label,
-        category=body.category,
+        category=body.category,  # legacy (may be None when category_id is used)
+        category_id=category_obj.id if category_obj else None,
         amount=Decimal(str(abs(transaction.debit_amount))),
         period_month=statement.period_month if statement else None,
         period_year=statement.period_year if statement else None,
     )
     db.add(alloc)
 
-    # Upsert VendorMapping if remember=True
-    if body.remember:
-        # Need building_id via statement
-        if statement:
-            keyword = body.vendor_label.strip().lower()
-            existing_mapping = db.query(VendorMapping).filter(
-                VendorMapping.building_id == statement.building_id,
-                VendorMapping.keyword == keyword,
-            ).first()
-            if existing_mapping:
-                existing_mapping.vendor_label = body.vendor_label
-                existing_mapping.category = body.category
-                existing_mapping.created_by = MappingCreatedBy.MANUAL
-            else:
-                db.add(VendorMapping(
-                    building_id=statement.building_id,
-                    keyword=keyword,
-                    vendor_label=body.vendor_label,
-                    category=body.category,
-                    created_by=MappingCreatedBy.MANUAL,
-                ))
+    # Upsert VendorMapping if remember=True. The mapping stores the building
+    # category name as the legacy string so the vendor classifier can re-apply
+    # it on the next upload.
+    if body.remember and statement:
+        keyword = body.vendor_label.strip().lower()
+        remember_category = category_obj.name if category_obj else body.category
+        existing_mapping = db.query(VendorMapping).filter(
+            VendorMapping.building_id == statement.building_id,
+            VendorMapping.keyword == keyword,
+        ).first()
+        if existing_mapping:
+            existing_mapping.vendor_label = body.vendor_label
+            existing_mapping.category = remember_category
+            existing_mapping.created_by = MappingCreatedBy.MANUAL
+        else:
+            db.add(VendorMapping(
+                building_id=statement.building_id,
+                keyword=keyword,
+                vendor_label=body.vendor_label,
+                category=remember_category,
+                created_by=MappingCreatedBy.MANUAL,
+            ))
 
     db.commit()
     db.refresh(alloc)
@@ -929,6 +964,9 @@ def categorize_transaction(
         "allocation_id": str(alloc.id),
         "vendor_label": alloc.label,
         "category": alloc.category,
+        "category_id": str(alloc.category_id) if alloc.category_id else None,
+        "category_name": category_obj.name if category_obj else None,
+        "category_color": category_obj.color if category_obj else None,
         "amount": float(alloc.amount),
     }
 
