@@ -1,4 +1,4 @@
-import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, BankStatement, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview, Allocation, SetAllocationsRequest, PortfolioTrendMonth, BuildingSummaryStats, ExpenseCategory, Expense, UploadResult } from '../types';
+import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, BankStatement, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview, Allocation, SetAllocationsRequest, PortfolioTrendMonth, BuildingSummaryStats, ExpenseCategory, Expense, UploadResult, BuildingReportPayload, ReportFormat } from '../types';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -352,4 +352,29 @@ export const apartmentsAPI = {
         body: JSON.stringify(data),
       }
     ),
+};
+
+// Reports API
+export const reportsAPI = {
+  getPayload: (buildingId: string, from: string, to: string) =>
+    fetchAPI<BuildingReportPayload>(`/api/v1/buildings/${buildingId}/report?from=${from}&to=${to}`),
+
+  async download(
+    buildingId: string,
+    from: string,
+    to: string,
+    format: ReportFormat,
+  ): Promise<{ blob: Blob; filename: string }> {
+    const token = localStorage.getItem(TOKEN_KEYS.ACCESS);
+    const url = `${API_BASE_URL}/api/v1/buildings/${buildingId}/report.${format}?from=${from}&to=${to}`;
+    const res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`Report download failed: ${res.status}`);
+    const blob = await res.blob();
+    const cd = res.headers.get('content-disposition') ?? '';
+    const m = cd.match(/filename\*=UTF-8''([^;]+)/i);
+    const filename = m ? decodeURIComponent(m[1]) : `report.${format}`;
+    return { blob, filename };
+  },
 };

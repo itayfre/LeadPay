@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -9,6 +10,7 @@ import PeriodRangePicker from '../components/building/PeriodRangePicker';
 import CollectionTab from '../components/building/CollectionTab';
 import SummaryTab from '../components/building/SummaryTab';
 import ExpensesTab from '../components/building/ExpensesTab';
+import ExportReportDialog from '../components/modals/ExportReportDialog';
 import { useBuildingPeriodRange } from '../hooks/useBuildingPeriodRange';
 
 const VALID_TABS: BuildingTab[] = ['summary', 'collection', 'expenses'];
@@ -33,6 +35,9 @@ export default function Dashboard() {
 
   // ── Period range (URL-synced) ──────────────────────────────────────────────
   const { range, setRange } = useBuildingPeriodRange();
+
+  // ── Report export dialog ───────────────────────────────────────────────────
+  const [showExport, setShowExport] = useState(false);
 
   // ── Building header data ───────────────────────────────────────────────────
   const { data: building } = useQuery({
@@ -85,6 +90,12 @@ export default function Dashboard() {
             >
               📄 {t('dashboard.uploadStatement')}
             </button>
+            <button
+              onClick={() => setShowExport(true)}
+              className="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm"
+            >
+              📊 ייצוא דוח
+            </button>
           </div>
         </div>
 
@@ -107,6 +118,12 @@ export default function Dashboard() {
           <ExpensesTab buildingId={buildingId} range={range} />
         )}
       </div>
+
+      <ExportReportDialog
+        buildingId={buildingId}
+        isOpen={showExport}
+        onClose={() => setShowExport(false)}
+      />
     </Layout>
   );
 }

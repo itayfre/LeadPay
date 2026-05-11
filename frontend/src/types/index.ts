@@ -332,3 +332,65 @@ export interface UploadResult {
   match_rate: string;
   duplicate_warning?: string | null;
 }
+
+// --- Report export types ---
+
+export type ReportFormat = 'pdf' | 'docx';
+
+export interface ReportPeriodColumn {
+  key: string;
+  label: string;
+}
+
+export interface BuildingReportPayload {
+  building: {
+    name: string;
+    address: string;
+    city: string;
+    expected_monthly_payment: number | null;
+  };
+  period: {
+    from: string;
+    to: string;
+    label: string;
+    columns: ReportPeriodColumn[];
+    granularity: 'month' | 'quarter';
+  };
+  summary: {
+    total_income: number;
+    total_expenses: number;
+    net_balance: number;
+  };
+  income_by_tenant: Array<{
+    apartment_number: number;
+    tenant_name: string;
+    cells: Array<{ key: string; amount: number }>;
+    paid_total: number;
+    expected_total: number;
+    balance: number;
+  }>;
+  income_totals_row: {
+    cells: Array<{ key: string; amount: number }>;
+    paid_total: number;
+    expected_total: number;
+    balance: number;
+  };
+  expenses_by_month: Array<{
+    month_label: string;
+    rows: Array<{ description: string; category: string; amount: number }>;
+    subtotal: number;
+  }>;
+  expenses_grand_total: number;
+  debtors_period: Array<{
+    apartment_number: number;
+    tenant_name: string;
+    debt: number;
+    note: string;
+  }>;
+  debtors_lifetime: Array<{
+    apartment_number: number;
+    tenant_name: string;
+    debt: number;
+    note: string;
+  }>;
+}
