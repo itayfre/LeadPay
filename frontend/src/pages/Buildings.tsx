@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Layout from '../components/layout/Layout';
@@ -49,17 +49,19 @@ export default function Buildings() {
     (bulkSummary || []).map(s => [s.building_id, s])
   );
 
-  const handleDelete = async () => {
-    if (!buildingToDelete) return;
-
-    try {
-      await buildingsAPI.delete(buildingToDelete.id);
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => buildingsAPI.delete(id),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['buildings'] });
       setBuildingToDelete(null);
       setDeleteError(null);
-    } catch (err) {
-      setDeleteError((err as Error).message);
-    }
+    },
+    onError: (err: Error) => setDeleteError(err.message),
+  });
+
+  const handleDelete = () => {
+    if (!buildingToDelete) return;
+    deleteMutation.mutate(buildingToDelete.id);
   };
 
   const handleEdit = async (data: Partial<Building>) => {
@@ -307,8 +309,10 @@ export default function Buildings() {
         confirmText="מחק לצמיתות"
         cancelText="ביטול"
         type="danger"
+        isLoading={deleteMutation.isPending}
         onConfirm={handleDelete}
         onCancel={() => {
+          if (deleteMutation.isPending) return;
           setBuildingToDelete(null);
           setDeleteError(null);
         }}

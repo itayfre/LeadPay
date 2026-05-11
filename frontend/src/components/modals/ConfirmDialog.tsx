@@ -7,6 +7,7 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   type?: 'danger' | 'warning' | 'info';
+  isLoading?: boolean;
 }
 
 export default function ConfirmDialog({
@@ -18,6 +19,7 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
   type = 'danger',
+  isLoading = false,
 }: ConfirmDialogProps) {
   if (!isOpen) return null;
 
@@ -72,14 +74,22 @@ export default function ConfirmDialog({
         <div className="bg-gray-50 px-6 py-4 flex gap-3 justify-end">
           <button
             onClick={onCancel}
-            className="px-6 py-2 border-2 border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-100 transition-colors"
+            disabled={isLoading}
+            className="px-6 py-2 border-2 border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-transparent"
           >
             {cancelText}
           </button>
           <button
             onClick={onConfirm}
-            className={`px-6 py-2 ${style.button} text-white font-semibold rounded-lg transition-colors shadow-md`}
+            disabled={isLoading}
+            className={`px-6 py-2 ${style.button} text-white font-semibold rounded-lg transition-colors shadow-md disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2`}
           >
+            {isLoading && (
+              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+            )}
             {confirmText}
           </button>
         </div>

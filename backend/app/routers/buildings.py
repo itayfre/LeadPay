@@ -12,6 +12,7 @@ from collections import defaultdict
 
 from ..database import get_db
 from ..models import Building, Apartment, Tenant
+from ..models.transaction_allocation import TransactionAllocation
 from ..models.user import User
 from ..schemas import BuildingCreate, BuildingUpdate, BuildingResponse
 from ..dependencies.auth import require_manager, require_worker_plus, require_any_auth
@@ -206,6 +207,14 @@ def delete_building(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Building with id {building_id} not found"
         )
+
+    # Wipe allocations targeting tenants in this building first — otherwise the
+    # ON DELETE SET NULL FK on transaction_allocations.tenant_id fires during the
+    # cascade and violates ck_allocation_has_target for label-less allocations.
+    tenant_ids = db.query(Tenant.id).filter(Tenant.building_id == building_id).subquery()
+    db.query(TransactionAllocation).filter(
+        TransactionAllocation.tenant_id.in_(tenant_ids)
+    ).delete(synchronize_session=False)
 
     db.delete(db_building)
     db.commit()
