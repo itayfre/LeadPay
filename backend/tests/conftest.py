@@ -2,14 +2,55 @@
 Shared pytest configuration.
 
 Provides:
+- HARD GUARD: refuses to run pytest if DATABASE_URL points at the production
+  Supabase project. Production data is sacred — tests must never touch it.
+- Session-scoped autouse `reset_schema` fixture: drops + recreates the public
+  schema and runs all Alembic migrations once per pytest invocation, so every
+  run starts from a known clean state on the dev DB.
 - Default MANAGER auth stub (session-scoped, autouse).
 - `as_role` fixture that temporarily swaps the stub to another role within a single test.
 """
+import os
 import uuid
-import pytest
+
+from dotenv import load_dotenv
+
+# Load backend/.env BEFORE importing the app so the guard can read DATABASE_URL.
+load_dotenv()
+
+# ── HARD GUARD: never run tests against the production Supabase project. ─────
+_PROD_PROJECT_REF = "yfnjulutfurmqywwvvhx"
+_db_url = os.environ.get("DATABASE_URL", "")
+if _PROD_PROJECT_REF in _db_url:
+    raise RuntimeError(
+        "REFUSING to run pytest against the production database.\n"
+        f"DATABASE_URL points at the prod project ({_PROD_PROJECT_REF}).\n"
+        "Point backend/.env at the leadpay-dev Supabase project before running pytest."
+    )
+
+import pytest  # noqa: E402  — must come after guard so a failed guard doesn't import pytest plugins
+from sqlalchemy import text
+from alembic import command
+from alembic.config import Config
+
+from app.database import engine
 from app.main import app
 from app.dependencies.auth import get_current_user
 from app.models.user import User, UserRole, UserStatus
+
+
+# ── Session-scoped DB reset: one drop+recreate+migrate per pytest run. ───────
+@pytest.fixture(scope="session", autouse=True)
+def reset_schema():
+    """Drop + recreate the public schema and run migrations once per pytest session."""
+    with engine.begin() as conn:
+        conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+        conn.execute(text("CREATE SCHEMA public"))
+    cfg = Config("alembic.ini")
+    command.upgrade(cfg, "head")
+    yield
+    # Intentionally leave the schema in place after the run so failed-test
+    # state can be inspected in the dev DB.
 
 
 def _user_with_role(role: UserRole) -> User:
