@@ -342,6 +342,36 @@ export interface ReportPeriodColumn {
   label: string;
 }
 
+export interface RecentUpload {
+  id: string;
+  filename: string;
+  period: string;          // e.g. "5/2026"
+  upload_date: string;
+  transaction_count: number;
+  matched_count: number;
+  unmatched_count: number;
+}
+
+export interface RecentUploadsResponse {
+  building_id: string;
+  statement_count: number;
+  statements: RecentUpload[];
+}
+
+export interface TransactionPatchPayload {
+  activity_date?: string;        // ISO date (yyyy-mm-dd)
+  description?: string;
+  credit_amount?: number | null;
+  debit_amount?: number | null;
+}
+
+export interface SplitAllocationError {
+  code: 'split_allocation_requires_resplit';
+  message: string;
+  allocation_count: number;
+  transaction_id: string;
+}
+
 export interface BuildingReportPayload {
   building: {
     name: string;

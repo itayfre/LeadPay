@@ -1,10 +1,14 @@
 import { useState, useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { paymentsAPI, tenantsAPI, messagesAPI, apartmentsAPI } from '../../services/api';
+import { paymentsAPI, tenantsAPI, messagesAPI, apartmentsAPI, statementsAPI } from '../../services/api';
 import type { PaymentStatus, WhatsAppMessage, TenantPaymentHistory } from '../../types';
 import type { DateRange, MonthYear } from '../../hooks/useBuildingPeriodRange';
 import { expandRange } from '../../hooks/useBuildingPeriodRange';
+import { useAuth } from '../../context/AuthContext';
+import TransactionEditModal from '../modals/TransactionEditModal';
+import ConfirmDialog from '../modals/ConfirmDialog';
+import AllocationDrawer from '../modals/AllocationDrawer';
 
 // ─── Sub-types ────────────────────────────────────────────────────────────────
 
@@ -151,18 +155,42 @@ function PaymentHistoryModal({
   selectedMonthData,
   onSelectMonth,
   onClose,
+  buildingId,
+  onOpenAllocationEditor,
 }: {
   tenantHistory: TenantPaymentHistory | undefined;
   isLoading: boolean;
   selectedMonthData: { month: number; year: number } | null;
   onSelectMonth: (m: { month: number; year: number }) => void;
   onClose: () => void;
+  buildingId: string;
+  onOpenAllocationEditor: (txId: string) => void;
 }) {
   const activeMonth = selectedMonthData
     ? tenantHistory?.months.find(
         (m) => m.month === selectedMonthData.month && m.year === selectedMonthData.year
       )
     : tenantHistory?.months[tenantHistory.months.length - 1];
+
+  const { user } = useAuth();
+  const canEdit = user?.role === 'manager' || user?.role === 'worker';
+  const canDelete = user?.role === 'manager';
+  const [editingTx, setEditingTx] = useState<{ id: string; date: string; description: string; amount: number } | null>(null);
+  const [deletingTx, setDeletingTx] = useState<{ id: string; description: string; amount: number; date: string } | null>(null);
+  const queryClient = useQueryClient();
+
+  const deleteMutation = useMutation({
+    mutationFn: (txId: string) => statementsAPI.deleteTransaction(txId),
+    onSuccess: () => {
+      if (tenantHistory?.tenant_id) {
+        queryClient.invalidateQueries({ queryKey: ['tenantHistory', tenantHistory.tenant_id] });
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['tenantHistory'] });
+      }
+      queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId] });
+      setDeletingTx(null);
+    },
+  });
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -250,15 +278,35 @@ function PaymentHistoryModal({
                   ) : (
                     <div className="space-y-2">
                       {activeMonth.transactions.map((tx) => (
-                        <div key={tx.id} className="flex justify-between items-center py-2 border-b border-gray-100 text-sm">
-                          <div>
-                            <p className="text-gray-700">{tx.description}</p>
+                        <div key={tx.id} className="flex justify-between items-center py-2 border-b border-gray-100 text-sm group">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-gray-700 truncate">{tx.description}</p>
                             <p className="text-xs text-gray-400">{tx.date}</p>
                           </div>
                           <span className={`font-medium ${tx.is_manual ? 'text-blue-600' : 'text-green-600'}`}>
                             ₪{tx.amount.toLocaleString()}
                             {tx.is_manual && <span className="text-xs text-gray-400 mr-1"> (ידני)</span>}
                           </span>
+                          <div className="flex items-center gap-1 mr-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {canEdit && (
+                              <button
+                                onClick={() => setEditingTx({ id: tx.id, date: tx.date, description: tx.description, amount: tx.amount })}
+                                className="p-1.5 rounded hover:bg-gray-100 text-gray-600"
+                                title="ערוך"
+                              >
+                                ✏️
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button
+                                onClick={() => setDeletingTx({ id: tx.id, description: tx.description, amount: tx.amount, date: tx.date })}
+                                className="p-1.5 rounded hover:bg-red-50 text-red-600"
+                                title="מחק"
+                              >
+                                🗑️
+                              </button>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -271,6 +319,30 @@ function PaymentHistoryModal({
           </div>
         )}
       </div>
+
+      {editingTx && tenantHistory && (
+        <TransactionEditModal
+          transaction={editingTx}
+          tenantId={tenantHistory.tenant_id}
+          buildingId={buildingId}
+          onClose={() => setEditingTx(null)}
+          onOpenAllocationEditor={(txId) => {
+            setEditingTx(null);
+            onClose();
+            onOpenAllocationEditor(txId);
+          }}
+        />
+      )}
+
+      <ConfirmDialog
+        isOpen={!!deletingTx}
+        title="מחיקת עסקה"
+        message={deletingTx ? `האם למחוק את העסקה "${deletingTx.description}" בסך ₪${deletingTx.amount.toLocaleString()} מתאריך ${deletingTx.date}? פעולה זו תסיר את העסקה ואת התשלום המקושר אליה לדייר. לא ניתן לשחזר.` : ''}
+        confirmText="מחק"
+        type="danger"
+        onCancel={() => setDeletingTx(null)}
+        onConfirm={() => deletingTx && deleteMutation.mutate(deletingTx.id)}
+      />
     </div>
   );
 }
@@ -295,6 +367,7 @@ export default function CollectionTab({ buildingId, range }: Props) {
   const [revertConfirm, setRevertConfirm] = useState<AggregatedTenant | null>(null);
   const [historyTenantId, setHistoryTenantId] = useState<string | null>(null);
   const [selectedHistoryMonth, setSelectedHistoryMonth] = useState<{ month: number; year: number } | null>(null);
+  const [allocationEditorTxId, setAllocationEditorTxId] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [sortColumn, setSortColumn] = useState<SortCol>('apartment_number');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -823,6 +896,20 @@ export default function CollectionTab({ buildingId, range }: Props) {
           selectedMonthData={selectedHistoryMonth}
           onSelectMonth={setSelectedHistoryMonth}
           onClose={() => { setHistoryTenantId(null); setSelectedHistoryMonth(null); }}
+          buildingId={buildingId}
+          onOpenAllocationEditor={(txId) => setAllocationEditorTxId(txId)}
+        />
+      )}
+
+      {allocationEditorTxId && (
+        <AllocationDrawer
+          transactionId={allocationEditorTxId}
+          onClose={() => setAllocationEditorTxId(null)}
+          onSaved={() => {
+            setAllocationEditorTxId(null);
+            queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId] });
+            queryClient.invalidateQueries({ queryKey: ['tenantHistory'] });
+          }}
         />
       )}
     </div>

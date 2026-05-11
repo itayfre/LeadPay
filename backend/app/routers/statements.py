@@ -13,11 +13,12 @@ from ..models import (
 from ..models.user import User
 from ..schemas.allocation import SetAllocationsRequest, AllocationResponse
 from ..schemas.expense import CategorizeRequest, VendorMappingResponse
+from ..schemas.transaction_patch import TransactionPatchRequest
 from ..services.excel_parser import BankStatementParser
 from ..services.matching_engine import NameMatchingEngine
 from ..services import allocation_service
 from ..services import vendor_classifier as vc
-from ..dependencies.auth import require_worker_plus, require_viewer_plus
+from ..dependencies.auth import require_worker_plus, require_viewer_plus, require_manager
 import logging
 import os
 from slowapi import Limiter
@@ -614,6 +615,83 @@ def get_statement_transactions(
     }
 
 
+@router.get("/transactions/{transaction_id}/review-form")
+def get_transaction_review_form(
+    transaction_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_viewer_plus),
+):
+    """Return a single transaction shaped like a `ReviewTransaction` plus
+    the building's tenant list — used by the AllocationDrawer when opened
+    outside of the statement-review flow (e.g. from CollectionTab).
+    """
+    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
+    if not transaction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Transaction with id {transaction_id} not found",
+        )
+
+    statement = db.query(BankStatement).filter(
+        BankStatement.id == transaction.statement_id
+    ).first()
+    if not statement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Owning statement not found",
+        )
+
+    tenants = db.query(Tenant).join(Apartment).filter(
+        Apartment.building_id == statement.building_id,
+        Tenant.is_active == True,
+    ).all()
+    tenant_map = {str(t.id): t.name for t in tenants}
+
+    parser = BankStatementParser()
+    payer_name = transaction.payer_name or parser._extract_payer_name(transaction.description) or ''
+
+    allocations_payload = [
+        {
+            'id': str(a.id),
+            'tenant_id': str(a.tenant_id) if a.tenant_id else None,
+            'tenant_name': tenant_map.get(str(a.tenant_id), '') if a.tenant_id else None,
+            'label': a.label,
+            'amount': float(a.amount) if a.amount is not None else None,
+            'period_month': a.period_month,
+            'period_year': a.period_year,
+            'category': a.category,
+        }
+        for a in (transaction.allocations or [])
+    ]
+
+    tx_payload = {
+        'id': str(transaction.id),
+        'activity_date': transaction.activity_date.isoformat(),
+        'description': transaction.description,
+        'payer_name': payer_name,
+        'credit_amount': float(transaction.credit_amount) if transaction.credit_amount else None,
+        'debit_amount': float(transaction.debit_amount) if transaction.debit_amount else None,
+        'transaction_type': transaction.transaction_type.value if transaction.transaction_type else 'other',
+        'tenant_id': str(transaction.matched_tenant_id) if transaction.matched_tenant_id else None,
+        'tenant_name': tenant_map.get(str(transaction.matched_tenant_id), '') if transaction.matched_tenant_id else None,
+        'match_confidence': transaction.match_confidence,
+        'match_method': transaction.match_method.value if transaction.match_method else None,
+        'is_confirmed': transaction.is_confirmed,
+        'allocations': allocations_payload,
+    }
+
+    all_tenants = [
+        {'tenant_id': str(t.id), 'tenant_name': t.name}
+        for t in tenants
+    ]
+
+    return {
+        'tx': tx_payload,
+        'all_tenants': all_tenants,
+        'building_id': str(statement.building_id),
+    }
+
+
 @router.post("/transactions/{transaction_id}/allocations", response_model=List[AllocationResponse])
 def set_transaction_allocations(
     transaction_id: UUID,
@@ -803,11 +881,73 @@ def ignore_transaction(
     return {"ok": True, "transaction_id": str(transaction_id)}
 
 
+@router.patch("/transactions/{transaction_id}")
+def patch_transaction(
+    transaction_id: UUID,
+    payload: TransactionPatchRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_worker_plus),
+):
+    """
+    Edit fields on a single transaction.
+
+    Amount-change semantics:
+    - 0 or 1 allocations → update freely; if 1 allocation, sync its amount too.
+    - 2+ allocations → 409 with code='split_allocation_requires_resplit'.
+    Description/date edits are never blocked.
+    """
+    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
+    if not transaction:
+        raise HTTPException(status_code=404, detail=f"Transaction with id {transaction_id} not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    amount_changed = "credit_amount" in data or "debit_amount" in data
+
+    if amount_changed:
+        allocations = list(transaction.allocations or [])
+        if len(allocations) >= 2:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "split_allocation_requires_resplit",
+                    "message": "Transaction has split allocations; reassign them before changing the amount.",
+                    "allocation_count": len(allocations),
+                    "transaction_id": str(transaction.id),
+                },
+            )
+
+    if "activity_date" in data:
+        transaction.activity_date = data["activity_date"]
+    if "description" in data:
+        transaction.description = data["description"]
+    if "credit_amount" in data:
+        transaction.credit_amount = data["credit_amount"]
+    if "debit_amount" in data:
+        transaction.debit_amount = data["debit_amount"]
+
+    # Sync the single allocation amount when present
+    if amount_changed and (transaction.allocations and len(transaction.allocations) == 1):
+        new_amt = transaction.credit_amount if transaction.credit_amount is not None else transaction.debit_amount
+        if new_amt is not None:
+            transaction.allocations[0].amount = abs(new_amt)
+
+    db.commit()
+    db.refresh(transaction)
+
+    return {
+        "id": str(transaction.id),
+        "activity_date": transaction.activity_date.isoformat(),
+        "description": transaction.description,
+        "credit_amount": float(transaction.credit_amount) if transaction.credit_amount is not None else None,
+        "debit_amount": float(transaction.debit_amount) if transaction.debit_amount is not None else None,
+    }
+
+
 @router.delete("/transactions/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_transaction(
     transaction_id: UUID,
     db: Session = Depends(get_db),
-    _: User = Depends(require_worker_plus),
+    _: User = Depends(require_manager),
 ):
     """
     Hard-delete a transaction from the building.
@@ -823,6 +963,30 @@ def delete_transaction(
         )
 
     db.delete(transaction)
+    db.commit()
+    return None
+
+
+@router.delete("/{statement_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_statement(
+    statement_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_manager),
+):
+    """
+    Hard-delete a bank statement and all its transactions + allocations.
+    NameMappings and VendorMappings are intentionally preserved — they are a
+    learned training set, not statement metadata.
+    Returns 204 No Content.
+    """
+    statement = db.query(BankStatement).filter(BankStatement.id == statement_id).first()
+    if not statement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Bank statement with id {statement_id} not found",
+        )
+
+    db.delete(statement)
     db.commit()
     return None
 
@@ -845,6 +1009,8 @@ def list_building_statements(
         BankStatement.building_id == building_id
     ).order_by(BankStatement.period_year.desc(), BankStatement.period_month.desc()).all()
 
+    # Compute match counts per statement. PAYMENT transactions with a matched_tenant_id
+    # count as matched; PAYMENT/credit-TRANSFER without one count as unmatched.
     return {
         "building_id": str(building_id),
         "statement_count": len(statements),
@@ -854,10 +1020,23 @@ def list_building_statements(
                 "filename": s.original_filename,
                 "period": f"{s.period_month}/{s.period_year}",
                 "upload_date": s.upload_date.isoformat(),
-                "transaction_count": len(s.transactions)
+                "transaction_count": len(s.transactions),
+                "matched_count": sum(
+                    1 for t in s.transactions
+                    if t.matched_tenant_id is not None
+                    and t.transaction_type == TransactionType.PAYMENT
+                ),
+                "unmatched_count": sum(
+                    1 for t in s.transactions
+                    if t.matched_tenant_id is None
+                    and (
+                        t.transaction_type == TransactionType.PAYMENT
+                        or (t.transaction_type == TransactionType.TRANSFER and t.credit_amount)
+                    )
+                ),
             }
             for s in statements
-        ]
+        ],
     }
 
 

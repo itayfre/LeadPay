@@ -2,12 +2,23 @@ import { useState, useEffect } from 'react';
 import { statementsAPI } from '../../services/api';
 import type { ReviewTransaction, MatchSuggestion, AllocationItem, AllocationMode } from '../../types';
 
-interface Props {
+interface PropsWithData {
   tx: ReviewTransaction;
   allTenants: MatchSuggestion[];
+  transactionId?: undefined;
   onClose: () => void;
   onSaved: () => void;
 }
+
+interface PropsWithId {
+  transactionId: string;
+  tx?: undefined;
+  allTenants?: undefined;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+type Props = PropsWithData | PropsWithId;
 
 function formatAmount(amount?: number | null) {
   if (amount == null) return '—';
@@ -54,7 +65,96 @@ function currentYearMonth(): { month: string; year: string } {
   return { month: String(now.getMonth() + 1).padStart(2, '0'), year: String(now.getFullYear()) };
 }
 
-export default function AllocationDrawer({ tx, allTenants, onClose, onSaved }: Props) {
+export default function AllocationDrawer(props: Props) {
+  // If only a transactionId is provided, fetch the data first.
+  if ('transactionId' in props && props.transactionId) {
+    return (
+      <AllocationDrawerLoader
+        transactionId={props.transactionId}
+        onClose={props.onClose}
+        onSaved={props.onSaved}
+      />
+    );
+  }
+  return (
+    <AllocationDrawerInner
+      tx={(props as PropsWithData).tx}
+      allTenants={(props as PropsWithData).allTenants}
+      onClose={props.onClose}
+      onSaved={props.onSaved}
+    />
+  );
+}
+
+function AllocationDrawerLoader({
+  transactionId,
+  onClose,
+  onSaved,
+}: {
+  transactionId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [data, setData] = useState<{ tx: ReviewTransaction; allTenants: MatchSuggestion[] } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await statementsAPI.getTransactionReviewForm(transactionId);
+        if (!cancelled) setData({ tx: res.tx, allTenants: res.all_tenants });
+      } catch (err) {
+        if (!cancelled) setLoadError((err as Error).message || 'שגיאה בטעינה');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [transactionId]);
+
+  if (loadError) {
+    return (
+      <>
+        <div className="fixed inset-0 bg-black bg-opacity-30 z-[60]" onClick={onClose} />
+        <div className="fixed top-0 right-0 bottom-0 w-full max-w-md bg-white shadow-2xl z-[70] flex flex-col items-center justify-center p-6" dir="rtl">
+          <p className="text-red-600 mb-4">{loadError}</p>
+          <button onClick={onClose} className="px-4 py-2 bg-gray-200 rounded">סגור</button>
+        </div>
+      </>
+    );
+  }
+
+  if (!data) {
+    return (
+      <>
+        <div className="fixed inset-0 bg-black bg-opacity-30 z-[60]" onClick={onClose} />
+        <div className="fixed top-0 right-0 bottom-0 w-full max-w-md bg-white shadow-2xl z-[70] flex items-center justify-center" dir="rtl">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" />
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <AllocationDrawerInner
+      tx={data.tx}
+      allTenants={data.allTenants}
+      onClose={onClose}
+      onSaved={onSaved}
+    />
+  );
+}
+
+function AllocationDrawerInner({
+  tx,
+  allTenants,
+  onClose,
+  onSaved,
+}: {
+  tx: ReviewTransaction;
+  allTenants: MatchSuggestion[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const headline = tx.credit_amount ?? tx.debit_amount ?? 0;
   const { month: nowMonth, year: nowYear } = currentYearMonth();
 

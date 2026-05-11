@@ -80,7 +80,34 @@
     "dragDrop": "Drag file here or click to select",
     "uploading": "Uploading...",
     "success": "Uploaded successfully!",
-    "error": "Upload error"
+    "error": "Upload error",
+    "recentUploads": {
+      "title": "Recent uploads",
+      "empty": "No statements have been uploaded for this building yet",
+      "showMore": "Show more ({{count}})",
+      "transactions": "{{count}} transactions",
+      "matched": "{{count}} matched",
+      "unmatched": "{{count}} unmatched"
+    },
+    "delete": {
+      "confirmTitle": "Delete upload \"{{filename}}\"",
+      "confirmBody": "This will permanently delete the upload and all {{count}} of its transactions. Learned matches will be preserved. This action cannot be undone."
+    }
+  },
+  "transaction": {
+    "edit": {
+      "title": "Edit transaction",
+      "fields": { "date": "Date", "desc": "Description", "amount": "Amount" },
+      "splitError": {
+        "title": "Cannot update amount",
+        "body": "This transaction is split across {{count}} allocations (e.g. between multiple tenants or months). Changing the total amount requires re-defining the split.\n\nTo update the amount:\n1. Close this window\n2. Click \"Open allocation editor\" below\n3. Update the split to the new amount",
+        "cta": "Open allocation editor"
+      }
+    },
+    "delete": {
+      "confirmTitle": "Delete transaction",
+      "confirmBody": "Delete this transaction? This will remove the transaction and the associated tenant payment. This action cannot be undone."
+    }
   },
   "common": {
     "save": "Save",

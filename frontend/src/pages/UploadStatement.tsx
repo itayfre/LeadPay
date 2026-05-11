@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import Layout from '../components/layout/Layout';
 import { statementsAPI } from '../services/api';
 import UploadReviewModal from '../components/modals/UploadReviewModal';
+import RecentUploadsList from '../components/upload/RecentUploadsList';
 import type { UploadResult } from '../types';
 
 export default function UploadStatement() {
@@ -17,6 +18,7 @@ export default function UploadStatement() {
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reopenStatementId, setReopenStatementId] = useState<string | null>(null);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -155,6 +157,12 @@ export default function UploadStatement() {
           </div>
         )}
 
+        {/* Recent uploads list */}
+        <RecentUploadsList
+          buildingId={buildingId}
+          onEdit={(statementId) => setReopenStatementId(statementId)}
+        />
+
         {/* Instructions */}
         {!uploadResult && !error && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
@@ -188,6 +196,15 @@ export default function UploadStatement() {
           buildingId={buildingId}
           uploadResult={uploadResult}
           onClose={() => setUploadResult(null)}
+        />
+      )}
+
+      {/* Review Modal — re-opened from RecentUploadsList */}
+      {reopenStatementId && (
+        <UploadReviewModal
+          statementId={reopenStatementId}
+          buildingId={buildingId}
+          onClose={() => setReopenStatementId(null)}
         />
       )}
     </Layout>

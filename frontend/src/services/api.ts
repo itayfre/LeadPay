@@ -1,4 +1,4 @@
-import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, BankStatement, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview, Allocation, SetAllocationsRequest, PortfolioTrendMonth, BuildingSummaryStats, ExpenseCategory, Expense, UploadResult, BuildingReportPayload, ReportFormat } from '../types';
+import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview, Allocation, SetAllocationsRequest, PortfolioTrendMonth, BuildingSummaryStats, ExpenseCategory, Expense, UploadResult, BuildingReportPayload, ReportFormat, RecentUploadsResponse, TransactionPatchPayload, SplitAllocationError, ReviewTransaction, MatchSuggestion } from '../types';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -78,7 +78,17 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit, _retry = fal
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
+    const detail = error?.detail;
+    const message =
+      typeof detail === 'string'
+        ? detail
+        : detail && typeof detail === 'object' && typeof (detail as { message?: unknown }).message === 'string'
+          ? (detail as { message: string }).message
+          : `HTTP ${response.status}`;
+    const err = new Error(message) as Error & { status: number; detail: unknown };
+    err.status = response.status;
+    err.detail = detail;
+    throw err;
   }
 
   if (response.status === 204 || response.status === 205) {
@@ -206,14 +216,42 @@ export const statementsAPI = {
     return fetchAPI<UploadResult>(`/api/v1/statements/${buildingId}/upload`, { method: 'POST', body: formData });
   },
 
-  list: (buildingId: string) =>
-    fetchAPI<{ statements: BankStatement[] }>(`/api/v1/statements/${buildingId}/statements`),
+  listForBuilding: (buildingId: string): Promise<RecentUploadsResponse> =>
+    fetchAPI<RecentUploadsResponse>(`/api/v1/statements/${buildingId}/statements`),
+
+  delete: async (statementId: string): Promise<void> => {
+    await fetchAPI<void>(`/api/v1/statements/${statementId}`, { method: 'DELETE' });
+  },
+
+  patchTransaction: async (txId: string, body: TransactionPatchPayload): Promise<void> => {
+    try {
+      await fetchAPI<unknown>(`/api/v1/statements/transactions/${txId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (err) {
+      // Re-throw structured 409 so the modal can render the split-error UI.
+      if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 409) {
+        const detail = (err as { detail?: unknown }).detail;
+        if (detail && typeof detail === 'object' && (detail as { code?: string }).code === 'split_allocation_requires_resplit') {
+          throw detail as SplitAllocationError;
+        }
+      }
+      throw err;
+    }
+  },
 
   getTransactions: (statementId: string) =>
     fetchAPI<{ transactions: Transaction[] }>(`/api/v1/statements/${statementId}/transactions`),
 
   getReview: (statementId: string) =>
     fetchAPI<StatementReview>(`/api/v1/statements/${statementId}/review`),
+
+  getTransactionReviewForm: (transactionId: string) =>
+    fetchAPI<{ tx: ReviewTransaction; all_tenants: MatchSuggestion[]; building_id: string }>(
+      `/api/v1/statements/transactions/${transactionId}/review-form`
+    ),
 
   manualMatch: (transactionId: string, tenantId: string) =>
     fetchAPI<any>(
