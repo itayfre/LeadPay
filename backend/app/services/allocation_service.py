@@ -39,11 +39,18 @@ def derive_period(
 ) -> tuple[Optional[int], Optional[int]]:
     """Return (month, year) the allocation should default to.
 
+    The allocation period represents the *billing month* a payment covers —
+    not the filing period of the statement it arrived in. A multi-month
+    upload (e.g. a May statement containing Jan/Feb/March payments) must
+    spread each row to its own billing month.
+
     Order of preference:
-      1. Parent bank-statement period (most authoritative).
-      2. Transaction `activity_date` (works for manual transactions where
-         `statement_id` is null).
+      1. Transaction `activity_date` — the bank-recorded date of the payment.
+      2. Parent bank-statement period — fallback for the rare row with no date.
     """
+    if transaction.activity_date:
+        return transaction.activity_date.month, transaction.activity_date.year
+
     if transaction.statement_id:
         statement = (
             db.query(BankStatement)
@@ -52,9 +59,6 @@ def derive_period(
         )
         if statement and statement.period_month and statement.period_year:
             return statement.period_month, statement.period_year
-
-    if transaction.activity_date:
-        return transaction.activity_date.month, transaction.activity_date.year
 
     return None, None
 

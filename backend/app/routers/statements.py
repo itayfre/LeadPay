@@ -269,8 +269,6 @@ async def upload_bank_statement(
                         db=db,
                         transaction=transaction,
                         tenant_id=learned_tid,
-                        period_month=metadata.get('period_month'),
-                        period_year=metadata.get('period_year'),
                     )
                     if trans_data['transaction_type'] == 'payment':
                         payment_transactions.append(trans_data)
@@ -304,8 +302,6 @@ async def upload_bank_statement(
                     db=db,
                     transaction=transaction,
                     tenant_id=UUID(tenant_id),
-                    period_month=metadata.get('period_month'),
-                    period_year=metadata.get('period_year'),
                 )
 
                 # Save to NameMapping when auto-confirming a high-confidence fuzzy match
@@ -337,14 +333,15 @@ async def upload_bank_statement(
             if result:
                 db.add(transaction)
                 db.flush()
+                activity = trans_data.get('activity_date')
                 db.add(TransactionAllocation(
                     transaction_id=transaction.id,
                     tenant_id=None,
                     label=result['vendor_label'],
                     category=result['category'],
                     amount=_D(str(abs(trans_data['debit_amount']))),
-                    period_month=metadata.get('period_month'),
-                    period_year=metadata.get('period_year'),
+                    period_month=activity.month if activity else metadata.get('period_month'),
+                    period_year=activity.year if activity else metadata.get('period_year'),
                 ))
                 expense_classified += 1
                 continue  # already added above
@@ -1102,6 +1099,7 @@ def categorize_transaction(
         db.delete(existing)
         db.flush()
 
+    activity = transaction.activity_date
     alloc = TransactionAllocation(
         transaction_id=transaction_id,
         tenant_id=None,
@@ -1109,8 +1107,8 @@ def categorize_transaction(
         category=body.category,  # legacy (may be None when category_id is used)
         category_id=category_obj.id if category_obj else None,
         amount=Decimal(str(abs(transaction.debit_amount))),
-        period_month=statement.period_month if statement else None,
-        period_year=statement.period_year if statement else None,
+        period_month=activity.month if activity else (statement.period_month if statement else None),
+        period_year=activity.year if activity else (statement.period_year if statement else None),
         notes=(body.notes.strip() if body.notes and body.notes.strip() else None),
     )
     db.add(alloc)
