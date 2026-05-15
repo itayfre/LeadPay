@@ -11,6 +11,7 @@
     "settings": "Settings",
     "tenants": "Tenants",
     "statements": "Bank Statements",
+    "transactions": "Transactions",
     "users": "User Management"
   },
   "layout": {

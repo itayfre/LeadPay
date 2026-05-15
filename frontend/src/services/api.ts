@@ -1,4 +1,4 @@
-import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview, Allocation, SetAllocationsRequest, PortfolioTrendMonth, BuildingSummaryStats, ExpenseCategory, Expense, UploadResult, BuildingReportPayload, ReportFormat, RecentUploadsResponse, TransactionPatchPayload, SplitAllocationError, ReviewTransaction, MatchSuggestion } from '../types';
+import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview, Allocation, SetAllocationsRequest, PortfolioTrendMonth, BuildingSummaryStats, ExpenseCategory, Expense, UploadResult, BuildingReportPayload, ReportFormat, RecentUploadsResponse, TransactionPatchPayload, SplitAllocationError, ReviewTransaction, MatchSuggestion, TransactionsListParams, TransactionsListResponse, TransactionCreatePayload, TransactionRow } from '../types';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -312,6 +312,50 @@ export const statementsAPI = {
       `/api/v1/transactions/${transactionId}/categorize`,
       { method: 'DELETE' }
     ),
+};
+
+// ── Global Transactions API (cross-building list + manual create) ────────────
+//
+// CRUD on individual rows still lives on `statementsAPI` (patchTransaction,
+// deleteTransaction, manualMatch, unmatchTransaction, ignoreTransaction,
+// setAllocations) — this module only owns the global list + create.
+
+function buildTransactionsQuery(params: TransactionsListParams): string {
+  const qs = new URLSearchParams();
+  const appendList = (key: string, values?: string[]) => {
+    if (!values) return;
+    for (const v of values) qs.append(key, v);
+  };
+  appendList('building_id', params.building_id);
+  appendList('type', params.type);
+  appendList('match_status', params.match_status);
+  appendList('category_id', params.category_id);
+  if (params.direction) qs.set('direction', params.direction);
+  if (params.tenant_id) qs.set('tenant_id', params.tenant_id);
+  if (params.source) qs.set('source', params.source);
+  if (params.date_from) qs.set('date_from', params.date_from);
+  if (params.date_to) qs.set('date_to', params.date_to);
+  if (params.amount_min !== undefined) qs.set('amount_min', String(params.amount_min));
+  if (params.amount_max !== undefined) qs.set('amount_max', String(params.amount_max));
+  if (params.q) qs.set('q', params.q);
+  if (params.sort) qs.set('sort', params.sort);
+  if (params.page) qs.set('page', String(params.page));
+  if (params.page_size) qs.set('page_size', String(params.page_size));
+  const s = qs.toString();
+  return s ? `?${s}` : '';
+}
+
+export const transactionsAPI = {
+  list: (params: TransactionsListParams = {}) =>
+    fetchAPI<TransactionsListResponse>(
+      `/api/v1/transactions/${buildTransactionsQuery(params)}`
+    ),
+
+  create: (payload: TransactionCreatePayload) =>
+    fetchAPI<TransactionRow>('/api/v1/transactions/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 };
 
 // Messages API

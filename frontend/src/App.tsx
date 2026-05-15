@@ -16,6 +16,7 @@ import Settings from './pages/Settings';
 import WhatsAppTemplates from './pages/WhatsAppTemplates';
 import Tenants from './pages/Tenants';
 import AllTenants from './pages/AllTenants';
+import Transactions from './pages/Transactions';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import InviteAccept from './pages/InviteAccept';
@@ -144,6 +145,9 @@ function App() {
               } />
               <Route path="/tenants" element={
                 <ProtectedRoute><AllTenants /></ProtectedRoute>
+              } />
+              <Route path="/transactions" element={
+                <ProtectedRoute><Transactions /></ProtectedRoute>
               } />
               {/* Manager-only: user management */}
               <Route path="/users" element={
