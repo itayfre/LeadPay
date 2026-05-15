@@ -11,6 +11,10 @@
 - PostgreSQL via Supabase
 - pytest for testing
 
+### Local dev process
+- Always launch from the project venv: `venv/bin/uvicorn app.main:app --reload --port 8000` (the `venv` symlink points at `/Users/frenkel/.venvs/leadpay`, Python 3.11). System `python3` is 3.9 and will fail on 3.10+ syntax in the codebase.
+- `--reload` reimports modules but cannot swap Python interpreters or pick up new packages. After changes to imports, deps, or env vars, kill the process and relaunch — don't trust the reload (see `tasks/lessons.md` 2026-05-15).
+
 ### File Structure
 ```
 app/
