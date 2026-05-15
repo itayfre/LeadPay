@@ -166,6 +166,14 @@ export interface TenantTransaction {
   is_manual: boolean;
 }
 
+export interface SoftCoverSource {
+  source_period: string;
+  source_tx_id: string;
+  source_tx_amount: number;
+  source_tx_date: string;
+  applied: number;
+}
+
 export interface TenantPaymentHistoryMonth {
   month: number;
   year: number;
@@ -175,6 +183,8 @@ export interface TenantPaymentHistoryMonth {
   difference: number;
   status: 'paid' | 'partial' | 'unpaid';
   transactions: TenantTransaction[];
+  soft_covered_by?: SoftCoverSource[] | null;
+  soft_covered_fully?: boolean;
 }
 
 export interface TenantPaymentHistory {
@@ -227,6 +237,82 @@ export interface Transaction {
   match_confidence?: number;
   match_method?: string;
   is_confirmed: boolean;
+}
+
+// Row shape returned by the global GET /api/v1/transactions/ endpoint.
+// Includes joined building/tenant names and an allocation summary so the
+// list page can render without follow-up requests per row.
+export interface TransactionRow {
+  id: string;
+  activity_date: string;
+  reference_number: string | null;
+  description: string;
+  payer_name: string | null;
+  credit_amount: number | null;
+  debit_amount: number | null;
+  balance: number | null;
+  transaction_type: string | null;
+  matched_tenant_id: string | null;
+  matched_tenant_name: string | null;
+  match_confidence: number | null;
+  match_method: string | null;
+  is_confirmed: boolean;
+  is_manual: boolean;
+  statement_id: string | null;
+  building_id: string | null;
+  building_name: string | null;
+  allocations_summary: {
+    count: number;
+    total: number;
+    top_label: string | null;
+  };
+}
+
+export interface TransactionsListResponse {
+  items: TransactionRow[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export type TransactionMatchStatus = 'confirmed' | 'auto' | 'unmatched' | 'ignored';
+export type TransactionSource = 'bank' | 'manual';
+export type TransactionDirection = 'credit' | 'debit' | 'both';
+
+export interface TransactionsListParams {
+  building_id?: string[];
+  type?: string[];
+  direction?: TransactionDirection;
+  match_status?: TransactionMatchStatus[];
+  tenant_id?: string;
+  category_id?: string[];
+  source?: TransactionSource;
+  date_from?: string;
+  date_to?: string;
+  amount_min?: number;
+  amount_max?: number;
+  q?: string;
+  sort?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export interface TransactionCreatePayload {
+  building_id: string;
+  activity_date: string;       // 'YYYY-MM-DD'
+  description: string;
+  payer_name?: string;
+  credit_amount?: number;
+  debit_amount?: number;
+  transaction_type?: 'payment' | 'fee' | 'transfer' | 'other';
+  reference_number?: string;
+  allocations?: Array<{
+    tenant_id?: string;
+    label?: string;
+    amount: number;
+    period_month?: number;
+    period_year?: number;
+  }>;
 }
 
 export interface BankStatement {

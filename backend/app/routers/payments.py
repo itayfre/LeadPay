@@ -322,10 +322,9 @@ def _calculate_tenant_debt_from_map(
             m = 1
             y += 1
 
-    total_debt = sum(
-        max(0.0, expected_monthly - paid_map.get((y, m), 0.0))
-        for y, m in months
-    )
+    total_expected = expected_monthly * len(months)
+    total_paid = sum(paid_map.get((y, m), 0.0) for y, m in months)
+    total_debt = max(0.0, total_expected - total_paid)
     return round(total_debt, 2)
 
 
@@ -510,7 +509,53 @@ def get_tenant_payment_history(
             "difference": round(diff, 2),
             "status": st,
             "transactions": month_txns,
+            "soft_covered_by": None,
+            "soft_covered_fully": False,
         })
+
+    # Soft-cover pass: any month with surplus contributes its overage to a
+    # pool of "credits". Then walk unpaid/partial months oldest → newest and
+    # draw from the pool (oldest credit first) to mark them as "may have been
+    # covered" by that big transaction. Display-only — no allocation mutation.
+    if expected_monthly > 0:
+        credits: list = []  # all surplus pools, in chronological order
+        for row in result_months:
+            surplus = row["paid"] - expected_monthly
+            if surplus > 0.5 and row["transactions"]:
+                big_tx = max(row["transactions"], key=lambda t: t["amount"])
+                credits.append({
+                    "source_period": row["period"],
+                    "source_tx_id": big_tx["id"],
+                    "source_tx_amount": big_tx["amount"],
+                    "source_tx_date": big_tx["date"],
+                    "remaining": surplus,
+                })
+
+        for row in result_months:
+            if row["status"] not in ("unpaid", "partial"):
+                continue
+            deficit = expected_monthly - row["paid"]
+            if deficit <= 0.5:
+                continue
+            consumed_from = []
+            for credit in credits:
+                if deficit <= 0.5:
+                    break
+                if credit["remaining"] <= 0.5:
+                    continue
+                take = min(credit["remaining"], deficit)
+                consumed_from.append({
+                    "source_period": credit["source_period"],
+                    "source_tx_id": credit["source_tx_id"],
+                    "source_tx_amount": credit["source_tx_amount"],
+                    "source_tx_date": credit["source_tx_date"],
+                    "applied": round(take, 2),
+                })
+                credit["remaining"] -= take
+                deficit -= take
+            if consumed_from:
+                row["soft_covered_by"] = consumed_from
+                row["soft_covered_fully"] = deficit <= 0.5
 
     return {
         "tenant_id": str(tenant.id),

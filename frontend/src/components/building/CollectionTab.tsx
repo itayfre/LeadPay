@@ -177,18 +177,43 @@ function PaymentHistoryModal({
   const canDelete = user?.role === 'manager';
   const [editingTx, setEditingTx] = useState<{ id: string; date: string; description: string; amount: number } | null>(null);
   const [deletingTx, setDeletingTx] = useState<{ id: string; description: string; amount: number; date: string } | null>(null);
+  const [addPaymentFor, setAddPaymentFor] = useState<{ month: number; year: number; period: string } | null>(null);
+  const [newPaymentAmount, setNewPaymentAmount] = useState('');
+  const [newPaymentNote, setNewPaymentNote] = useState('');
   const queryClient = useQueryClient();
+
+  const invalidateAfterChange = () => {
+    if (tenantHistory?.tenant_id) {
+      queryClient.invalidateQueries({ queryKey: ['tenantHistory', tenantHistory.tenant_id] });
+    } else {
+      queryClient.invalidateQueries({ queryKey: ['tenantHistory'] });
+    }
+    queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId] });
+  };
 
   const deleteMutation = useMutation({
     mutationFn: (txId: string) => statementsAPI.deleteTransaction(txId),
     onSuccess: () => {
-      if (tenantHistory?.tenant_id) {
-        queryClient.invalidateQueries({ queryKey: ['tenantHistory', tenantHistory.tenant_id] });
-      } else {
-        queryClient.invalidateQueries({ queryKey: ['tenantHistory'] });
-      }
-      queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId] });
+      invalidateAfterChange();
       setDeletingTx(null);
+    },
+  });
+
+  const addPaymentMutation = useMutation({
+    mutationFn: (input: { amount: number; month: number; year: number; note?: string }) =>
+      paymentsAPI.postManualPayment({
+        building_id: buildingId,
+        tenant_id: tenantHistory!.tenant_id,
+        amount: input.amount,
+        month: input.month,
+        year: input.year,
+        note: input.note,
+      }),
+    onSuccess: () => {
+      invalidateAfterChange();
+      setAddPaymentFor(null);
+      setNewPaymentAmount('');
+      setNewPaymentNote('');
     },
   });
 
@@ -248,17 +273,36 @@ function PaymentHistoryModal({
                           {m.difference >= 0 ? '+' : ''}₪{m.difference.toLocaleString()}
                         </td>
                         <td className="px-4 py-2">
-                          <span
-                            className={`text-xs px-1.5 py-0.5 rounded-full ${
-                              m.status === 'paid'
-                                ? 'bg-green-100 text-green-700'
-                                : m.status === 'partial'
-                                ? 'bg-yellow-100 text-yellow-700'
-                                : 'bg-red-100 text-red-700'
-                            }`}
-                          >
-                            {m.status === 'paid' ? '✓ שולם' : m.status === 'partial' ? '⚠ חלקי' : '✗ לא שולם'}
-                          </span>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span
+                              className={`text-xs px-1.5 py-0.5 rounded-full ${
+                                m.status === 'paid'
+                                  ? 'bg-green-100 text-green-700'
+                                  : m.status === 'partial'
+                                  ? 'bg-yellow-100 text-yellow-700'
+                                  : 'bg-red-100 text-red-700'
+                              }`}
+                            >
+                              {m.status === 'paid' ? '✓ שולם' : m.status === 'partial' ? '⚠ חלקי' : '✗ לא שולם'}
+                            </span>
+                            {m.soft_covered_by && m.soft_covered_by.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const first = m.soft_covered_by![0];
+                                  const [sm, sy] = first.source_period.split('/').map(Number);
+                                  if (sm && sy) onSelectMonth({ month: sm, year: sy });
+                                }}
+                                title={m.soft_covered_by
+                                  .map((s) => `ייתכן ששולם ${s.applied.toLocaleString()}₪ מתוך עסקה של ${s.source_tx_amount.toLocaleString()}₪ ב-${s.source_period} (${s.source_tx_date})`)
+                                  .join('\n')}
+                                className="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 hover:bg-blue-200"
+                              >
+                                ℹ ייתכן ששולם{m.soft_covered_fully ? '' : ' חלקית'}
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -270,9 +314,24 @@ function PaymentHistoryModal({
             <div className="w-1/2 overflow-y-auto p-6">
               {activeMonth ? (
                 <>
-                  <h4 className="font-semibold text-gray-900 mb-4">
-                    {activeMonth.period} — ₪{activeMonth.paid.toLocaleString()} / ₪{activeMonth.expected.toLocaleString()}
-                  </h4>
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="font-semibold text-gray-900">
+                      {activeMonth.period} — ₪{activeMonth.paid.toLocaleString()} / ₪{activeMonth.expected.toLocaleString()}
+                    </h4>
+                    {canEdit && (
+                      <button
+                        onClick={() => {
+                          setAddPaymentFor({ month: activeMonth.month, year: activeMonth.year, period: activeMonth.period });
+                          const remaining = Math.max(0, activeMonth.expected - activeMonth.paid);
+                          setNewPaymentAmount(remaining > 0 ? String(remaining) : '');
+                          setNewPaymentNote('');
+                        }}
+                        className="text-sm px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+                      >
+                        + הוסף תשלום
+                      </button>
+                    )}
+                  </div>
                   {activeMonth.transactions.length === 0 ? (
                     <p className="text-sm text-gray-400">אין עסקאות לחודש זה</p>
                   ) : (
@@ -343,6 +402,74 @@ function PaymentHistoryModal({
         onCancel={() => setDeletingTx(null)}
         onConfirm={() => deletingTx && deleteMutation.mutate(deletingTx.id)}
       />
+
+      {addPaymentFor && tenantHistory && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4" dir="rtl">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
+            <h3 className="text-lg font-bold text-gray-900">
+              הוספת תשלום — {tenantHistory.tenant_name}
+            </h3>
+            <p className="text-sm text-gray-500">
+              דירה {tenantHistory.apartment_number} • {addPaymentFor.period}
+            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">סכום (₪)</label>
+              <input
+                type="number"
+                value={newPaymentAmount}
+                onChange={(e) => setNewPaymentAmount(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                placeholder="500"
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">הערה (אופציונלי)</label>
+              <input
+                type="text"
+                value={newPaymentNote}
+                onChange={(e) => setNewPaymentNote(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                placeholder="תשלום במזומן"
+              />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => {
+                  setAddPaymentFor(null);
+                  setNewPaymentAmount('');
+                  setNewPaymentNote('');
+                }}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              >
+                ביטול
+              </button>
+              <button
+                onClick={() => {
+                  const amt = parseFloat(newPaymentAmount);
+                  if (!isNaN(amt) && amt > 0) {
+                    addPaymentMutation.mutate({
+                      amount: amt,
+                      month: addPaymentFor.month,
+                      year: addPaymentFor.year,
+                      note: newPaymentNote || undefined,
+                    });
+                  }
+                }}
+                disabled={
+                  !newPaymentAmount ||
+                  isNaN(parseFloat(newPaymentAmount)) ||
+                  parseFloat(newPaymentAmount) <= 0 ||
+                  addPaymentMutation.isPending
+                }
+                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-semibold"
+              >
+                {addPaymentMutation.isPending ? 'שומר...' : '✓ אשר תשלום'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
