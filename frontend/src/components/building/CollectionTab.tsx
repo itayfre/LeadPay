@@ -26,9 +26,6 @@ interface AggregatedTenant {
   total_debt: number;
   status: 'paid' | 'partial' | 'unpaid';
   months: Array<PaymentStatus & { period_label: string }>;
-  standing_order_active?: boolean;
-  standing_order_start_month?: number | null;
-  standing_order_start_year?: number | null;
   move_in_date?: string;
 }
 
@@ -480,91 +477,6 @@ function PaymentHistoryModal({
   );
 }
 
-// ─── StandingOrderModal ───────────────────────────────────────────────────────
-
-function StandingOrderModal({
-  tenant,
-  todayMonth,
-  saving,
-  onClose,
-  onSave,
-}: {
-  tenant: AggregatedTenant;
-  todayMonth: MonthYear;
-  saving: boolean;
-  onClose: () => void;
-  onSave: (active: boolean, startMonth: number | null, startYear: number | null) => void;
-}) {
-  const { t } = useTranslation();
-  const [active, setActive] = useState<boolean>(tenant.standing_order_active ?? false);
-  const [startMonth, setStartMonth] = useState<number>(tenant.standing_order_start_month ?? todayMonth.month);
-  const [startYear, setStartYear] = useState<number>(tenant.standing_order_start_year ?? todayMonth.year);
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" dir="rtl">
-      <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6 space-y-4">
-        <div>
-          <h3 className="text-lg font-bold text-gray-900">{t('collection.standingOrder.title')}</h3>
-          <p className="text-sm text-gray-500 mt-1">
-            {tenant.tenant_name} · {t('payment.apartment')} {tenant.apartment_number}
-          </p>
-        </div>
-
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={active}
-            onChange={(e) => setActive(e.target.checked)}
-            className="w-4 h-4 accent-sky-600"
-          />
-          <span className="text-sm font-medium text-gray-700">{t('collection.standingOrder.activeLabel')}</span>
-        </label>
-
-        {active && (
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-gray-700">{t('collection.standingOrder.startFrom')}</p>
-            <div className="flex gap-2">
-              <select
-                value={startMonth}
-                onChange={(e) => setStartMonth(Number(e.target.value))}
-                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500"
-              >
-                {HE_MONTHS.map((m, i) => (
-                  <option key={i + 1} value={i + 1}>{m}</option>
-                ))}
-              </select>
-              <input
-                type="number"
-                value={startYear}
-                onChange={(e) => setStartYear(Number(e.target.value))}
-                className="w-24 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 tabular-nums"
-              />
-            </div>
-          </div>
-        )}
-
-        <div className="flex gap-3 pt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-          >
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            onClick={() => onSave(active, active ? startMonth : null, active ? startYear : null)}
-            disabled={saving}
-            className="flex-1 px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 disabled:opacity-50 font-semibold"
-          >
-            {saving ? t('common.saving') : t('common.save')}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function CollectionTab({ buildingId, range }: Props) {
@@ -595,9 +507,6 @@ export default function CollectionTab({ buildingId, range }: Props) {
   const [matrixYear, setMatrixYear] = useState<number>(range.to.year);
   const [targetPaymentMonth, setTargetPaymentMonth] = useState<MonthYear | null>(null);
   const [pendingEditCell, setPendingEditCell] = useState<{ tenantId: string; month: number; year: number } | null>(null);
-  const [standingOrderEditFor, setStandingOrderEditFor] = useState<AggregatedTenant | null>(null);
-  const [savingStandingOrder, setSavingStandingOrder] = useState(false);
-
   // ── Derived range info ─────────────────────────────────────────────────────
   const effectiveRange: DateRange = useMemo(() => {
     if (viewMode === 'matrix') {
@@ -660,9 +569,6 @@ export default function CollectionTab({ buildingId, range }: Props) {
             total_debt: 0,
             status: 'unpaid',
             months: [],
-            standing_order_active: p.standing_order_active,
-            standing_order_start_month: p.standing_order_start_month,
-            standing_order_start_year: p.standing_order_start_year,
             move_in_date: p.move_in_date,
           });
         }
@@ -670,10 +576,6 @@ export default function CollectionTab({ buildingId, range }: Props) {
         agg.total_expected += p.expected_amount;
         agg.total_paid += p.paid_amount;
         agg.total_debt = p.total_debt; // always overwrite with latest
-        // Keep standing-order flags fresh from latest period
-        agg.standing_order_active = p.standing_order_active;
-        agg.standing_order_start_month = p.standing_order_start_month;
-        agg.standing_order_start_year = p.standing_order_start_year;
         agg.months.push({ ...p, period_label: label });
       });
     });
@@ -783,29 +685,6 @@ export default function CollectionTab({ buildingId, range }: Props) {
     setHistoryTenantId(null);
     setPendingEditCell(null);
   }, [pendingEditCell, tenantHistory]);
-
-  const handleStandingOrderClick = (tenant: AggregatedTenant) => {
-    setStandingOrderEditFor(tenant);
-  };
-
-  const handleSaveStandingOrder = async (
-    active: boolean,
-    startMonth: number | null,
-    startYear: number | null,
-  ) => {
-    if (!standingOrderEditFor) return;
-    setSavingStandingOrder(true);
-    try {
-      await apartmentsAPI.patch(standingOrderEditFor.apartment_id, {
-        standing_order_active: active,
-        standing_order_start_month: active ? startMonth : null,
-        standing_order_start_year: active ? startYear : null,
-      });
-      invalidate();
-      setStandingOrderEditFor(null);
-    } catch { /* ignore */ }
-    finally { setSavingStandingOrder(false); }
-  };
 
   const handleToggleLanguage = async (tenant: AggregatedTenant) => {
     if (togglingLanguage === tenant.tenant_id) return;
@@ -1004,7 +883,6 @@ export default function CollectionTab({ buildingId, range }: Props) {
           )}
           onCellClick={handleMatrixCellClick}
           onTenantClick={(t) => { setHistoryTenantId(t.tenant_id); setSelectedHistoryMonth(null); }}
-          onStandingOrderClick={handleStandingOrderClick}
           highlightCell={targetPaymentMonth ? { tenantId: manualPaymentFor?.tenant_id ?? '', month: targetPaymentMonth.month, year: targetPaymentMonth.year } : null}
         />
       )}
@@ -1192,17 +1070,6 @@ export default function CollectionTab({ buildingId, range }: Props) {
           </table>
         </div>
       </div>
-      )}
-
-      {/* Standing Order Edit Modal */}
-      {standingOrderEditFor && (
-        <StandingOrderModal
-          tenant={standingOrderEditFor}
-          todayMonth={todayMonth}
-          saving={savingStandingOrder}
-          onClose={() => setStandingOrderEditFor(null)}
-          onSave={handleSaveStandingOrder}
-        />
       )}
 
       {/* Manual Payment Modal */}

@@ -30,10 +30,10 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
     ownership_type: '',
     phone: '',
     email: '',
-    bank_name: '',
-    bank_account: '',
     language: 'he',
-    has_standing_order: false,
+    standing_order_start_date: '',
+    standing_order_end_date: '',
+    standing_order_amount: '',
     is_active: true,
     move_in_date: '2026-01-01',
   });
@@ -50,10 +50,10 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
         ownership_type: tenant.ownership_type || '',
         phone: tenant.phone || '',
         email: tenant.email || '',
-        bank_name: tenant.bank_name || '',
-        bank_account: tenant.bank_account || '',
         language: tenant.language || 'he',
-        has_standing_order: tenant.has_standing_order || false,
+        standing_order_start_date: tenant.standing_order_start_date || '',
+        standing_order_end_date: tenant.standing_order_end_date || '',
+        standing_order_amount: tenant.standing_order_amount != null ? String(tenant.standing_order_amount) : '',
         is_active: tenant.is_active !== false,
         move_in_date: tenant.move_in_date || '2026-01-01',
       });
@@ -75,6 +75,20 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
       return;
     }
 
+    const soStart = form.standing_order_start_date || null;
+    const soEnd = form.standing_order_end_date || null;
+    const soAmountNum = form.standing_order_amount.trim() === '' ? null : Number(form.standing_order_amount);
+    if (soStart) {
+      if (soAmountNum === null || Number.isNaN(soAmountNum) || soAmountNum <= 0) {
+        setError('נא להזין סכום הוראת קבע גדול מאפס');
+        return;
+      }
+      if (soEnd && soEnd < soStart) {
+        setError('תאריך סיום הוראת הקבע חייב להיות אחרי תאריך ההתחלה');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       if (isEdit && tenant) {
@@ -84,10 +98,10 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
           ownership_type: form.ownership_type ? form.ownership_type as Tenant['ownership_type'] : undefined,
           phone: form.phone || undefined,
           email: form.email || undefined,
-          bank_name: form.bank_name || undefined,
-          bank_account: form.bank_account || undefined,
           language: form.language as 'he' | 'en',
-          has_standing_order: form.has_standing_order,
+          standing_order_start_date: soStart,
+          standing_order_end_date: soEnd,
+          standing_order_amount: soStart ? soAmountNum : null,
           is_active: form.is_active,
           move_in_date: form.move_in_date || undefined,
         });
@@ -104,10 +118,10 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
           ownership_type: form.ownership_type || undefined,
           phone: form.phone || undefined,
           email: form.email || undefined,
-          bank_name: form.bank_name || undefined,
-          bank_account: form.bank_account || undefined,
           language: form.language,
-          has_standing_order: form.has_standing_order,
+          standing_order_start_date: soStart,
+          standing_order_end_date: soEnd,
+          standing_order_amount: soStart ? soAmountNum : null,
           is_active: form.is_active,
           move_in_date: form.move_in_date || undefined,
         });
@@ -209,20 +223,6 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
             </div>
 
             <div>
-              <label className={labelClass}>שם בנק <span className="text-gray-400 font-normal">(אופציונלי)</span></label>
-              <input type="text" value={form.bank_name}
-                onChange={e => setForm(f => ({ ...f, bank_name: e.target.value }))}
-                className={inputClass} placeholder="הפועלים" />
-            </div>
-
-            <div>
-              <label className={labelClass}>מספר חשבון בנק <span className="text-gray-400 font-normal">(אופציונלי)</span></label>
-              <input type="text" value={form.bank_account}
-                onChange={e => setForm(f => ({ ...f, bank_account: e.target.value }))}
-                className={inputClass} placeholder="12-345678" dir="ltr" />
-            </div>
-
-            <div>
               <label className={labelClass}>תאריך כניסה</label>
               <input type="date" value={form.move_in_date}
                 onChange={e => setForm(f => ({ ...f, move_in_date: e.target.value }))}
@@ -249,17 +249,38 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
 
             <div className="flex flex-col gap-3 justify-end">
               <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={form.has_standing_order}
-                  onChange={e => setForm(f => ({ ...f, has_standing_order: e.target.checked }))}
-                  className="w-4 h-4 text-blue-600 rounded" />
-                הוראת קבע
-              </label>
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input type="checkbox" checked={form.is_active}
                   onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))}
                   className="w-4 h-4 text-blue-600 rounded" />
                 דייר פעיל
               </label>
+            </div>
+
+            {/* Standing order — sky-tinted block to match the rest of the standing-order UI */}
+            <div className="col-span-2 rounded-lg border border-sky-100 bg-sky-50/60 p-4">
+              <div className="text-sm font-semibold text-sky-800 mb-3">הוראת קבע</div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className={labelClass}>תאריך התחלה</label>
+                  <input type="date" value={form.standing_order_start_date}
+                    onChange={e => setForm(f => ({ ...f, standing_order_start_date: e.target.value }))}
+                    className={inputClass} dir="ltr" />
+                </div>
+                <div>
+                  <label className={labelClass}>תאריך סיום <span className="text-gray-400 font-normal">(ללא = רציף)</span></label>
+                  <input type="date" value={form.standing_order_end_date}
+                    onChange={e => setForm(f => ({ ...f, standing_order_end_date: e.target.value }))}
+                    className={inputClass} dir="ltr" disabled={!form.standing_order_start_date} />
+                </div>
+                <div>
+                  <label className={labelClass}>סכום חודשי <span className="text-gray-400 font-normal">(₪)</span></label>
+                  <input type="number" min="0" step="1" value={form.standing_order_amount}
+                    onChange={e => setForm(f => ({ ...f, standing_order_amount: e.target.value }))}
+                    className={inputClass} dir="ltr"
+                    placeholder="0"
+                    required={!!form.standing_order_start_date} />
+                </div>
+              </div>
             </div>
           </div>
         </form>

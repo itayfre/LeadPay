@@ -15,9 +15,6 @@ export interface MatrixTenant {
   total_debt: number;
   status: 'paid' | 'partial' | 'unpaid';
   months: Array<PaymentStatus & { period_label: string }>;
-  standing_order_active?: boolean;
-  standing_order_start_month?: number | null;
-  standing_order_start_year?: number | null;
 }
 
 interface Props {
@@ -27,7 +24,6 @@ interface Props {
   moveInByApartment: Record<string, { year: number; month: number } | null>;
   onCellClick: (tenant: MatrixTenant, month: MonthYear, monthData: PaymentStatus | null) => void;
   onTenantClick: (tenant: MatrixTenant) => void;
-  onStandingOrderClick: (tenant: MatrixTenant) => void;
   highlightCell?: { tenantId: string; month: number; year: number } | null;
 }
 
@@ -36,10 +32,6 @@ const HE_MONTHS_SHORT = ['ינו', 'פבר', 'מרץ', 'אפר', 'מאי', 'יו
 function isBefore(a: MonthYear, b: MonthYear): boolean {
   if (a.year !== b.year) return a.year < b.year;
   return a.month < b.month;
-}
-
-function isSameOrAfter(a: MonthYear, b: MonthYear): boolean {
-  return !isBefore(a, b);
 }
 
 function fmt(n: number): string {
@@ -53,7 +45,6 @@ export default function CollectionMatrixView({
   moveInByApartment,
   onCellClick,
   onTenantClick,
-  onStandingOrderClick,
   highlightCell,
 }: Props) {
   const { t } = useTranslation();
@@ -118,9 +109,6 @@ export default function CollectionMatrixView({
                 const annualExpected = ten.months.reduce((s, m) => s + m.expected_amount, 0);
                 const annualPaid = ten.months.reduce((s, m) => s + m.paid_amount, 0);
                 const annualBalance = annualExpected - annualPaid;
-                const soStart = (ten.standing_order_active && ten.standing_order_start_month && ten.standing_order_start_year)
-                  ? { month: ten.standing_order_start_month, year: ten.standing_order_start_year }
-                  : null;
 
                 return (
                   <tr key={ten.tenant_id} className="hover:bg-slate-50">
@@ -128,27 +116,12 @@ export default function CollectionMatrixView({
                       {ten.apartment_number}
                     </td>
                     <td className="px-3 py-3 sticky right-10 bg-white">
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => onTenantClick(ten)}
-                          className="text-slate-900 font-medium hover:text-blue-600 hover:underline text-right"
-                        >
-                          {ten.tenant_name}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onStandingOrderClick(ten)}
-                          title={ten.standing_order_active ? t('collection.standingOrder.active') : t('collection.standingOrder.enable')}
-                          aria-label={t('collection.standingOrder.toggle')}
-                          className={`text-xs leading-none ${
-                            ten.standing_order_active
-                              ? 'text-sky-500 hover:text-sky-600'
-                              : 'text-slate-300 hover:text-sky-500'
-                          }`}
-                        >
-                          ↻
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => onTenantClick(ten)}
+                        className="text-slate-900 font-medium hover:text-blue-600 hover:underline text-right"
+                      >
+                        {ten.tenant_name}
+                      </button>
                     </td>
                     <td className="px-3 py-3 text-slate-600 tabular-nums">
                       {ten.months[0] ? fmt(ten.months[0].expected_amount) : '—'}
@@ -163,7 +136,8 @@ export default function CollectionMatrixView({
                       const moveInMY: MonthYear | null = moveIn ? { month: moveIn.month, year: moveIn.year } : null;
                       const beforeMoveIn = moveInMY ? isBefore(m, moveInMY) : false;
                       const isFuture = isBefore(todayMonth, m);
-                      const hasStandingOrder = soStart ? isSameOrAfter(m, soStart) : false;
+                      const hasStandingOrder = !!data?.has_standing_order;
+                      const standingOrderAmount = data?.standing_order_amount ?? null;
                       const expected = data?.expected_amount ?? 0;
                       const paid = data?.paid_amount ?? 0;
                       const cellStatus: 'paid' | 'partial' | 'unpaid' | 'empty' =
@@ -204,10 +178,10 @@ export default function CollectionMatrixView({
                         amountClass += ' text-amber-700';
                         title = t('collection.cell.completePartial');
                       } else if (hasStandingOrder) {
-                        cellClass += ' border border-dashed border-sky-300 bg-sky-50/50 cursor-pointer hover:border-sky-400';
+                        cellClass += ' border border-sky-200 bg-sky-50 cursor-pointer hover:bg-sky-100';
                         icon = '↻';
                         iconClass = 'text-sky-600 leading-none';
-                        amountText = fmt(expected);
+                        amountText = fmt(standingOrderAmount ?? expected);
                         amountClass += ' text-sky-700';
                         title = t('collection.standingOrder.expectedTooltip');
                       } else if (isFuture) {
@@ -280,7 +254,7 @@ export default function CollectionMatrixView({
           <LegendDot bg="bg-amber-50 border border-amber-200" iconClass="text-amber-700" icon="◐" label={t('collection.matrixLegend.partial')} />
           <LegendDot bg="ring-1 ring-rose-200 bg-rose-50/40" iconClass="text-rose-400" icon="○" label={t('collection.matrixLegend.overdue')} />
           <LegendDot bg="border border-slate-200 opacity-40" iconClass="text-slate-400" icon="○" label={t('collection.matrixLegend.future')} />
-          <LegendDot bg="border border-dashed border-sky-300 bg-sky-50/50" iconClass="text-sky-600" icon="↻" label={t('collection.matrixLegend.standingOrder')} />
+          <LegendDot bg="border border-sky-200 bg-sky-50" iconClass="text-sky-600" icon="↻" label={t('collection.matrixLegend.standingOrder')} />
           <LegendDot bg="" iconClass="text-slate-300" icon="—" label={t('collection.matrixLegend.empty')} />
         </div>
       </div>

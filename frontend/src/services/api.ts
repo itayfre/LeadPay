@@ -159,9 +159,9 @@ export const paymentsAPI = {
   getPortfolioTrend: (months = 13) =>
     fetchAPI<PortfolioTrendMonth[]>(`/api/v1/payments/portfolio-trend?months=${months}`),
 
-  getSummaryStats: (buildingId: string, from: string, to: string) =>
+  getSummaryStats: (buildingId: string, from: string, to: string, projectionMonths = 0) =>
     fetchAPI<BuildingSummaryStats>(
-      `/api/v1/payments/${buildingId}/summary-stats?from=${from}&to=${to}`
+      `/api/v1/payments/${buildingId}/summary-stats?from=${from}&to=${to}&projection_months=${projectionMonths}`
     ),
 };
 
@@ -393,10 +393,10 @@ export const tenantsAPI = {
     ownership_type?: string;
     phone?: string;
     email?: string;
-    bank_name?: string;
-    bank_account?: string;
     language?: string;
-    has_standing_order?: boolean;
+    standing_order_start_date?: string | null;
+    standing_order_end_date?: string | null;
+    standing_order_amount?: number | null;
     is_active?: boolean;
     move_in_date?: string;
   }) =>
@@ -427,16 +427,10 @@ export const tenantsAPI = {
 // Apartments API
 export interface ApartmentPatchBody {
   expected_payment?: number | null;
-  standing_order_active?: boolean;
-  standing_order_start_month?: number | null;
-  standing_order_start_year?: number | null;
 }
 export interface ApartmentPatchResponse {
   apartment_id: string;
   expected_payment: number | null;
-  standing_order_active: boolean;
-  standing_order_start_month: number | null;
-  standing_order_start_year: number | null;
 }
 export const apartmentsAPI = {
   patch: (apartmentId: string, data: ApartmentPatchBody) =>

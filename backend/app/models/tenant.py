@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, Date, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, String, Boolean, DateTime, Date, Numeric, ForeignKey, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime, date
@@ -32,9 +32,9 @@ class Tenant(Base):
     language = Column(SQLEnum(LanguagePreference, values_callable=lambda x: [e.value for e in x]), default=LanguagePreference.HEBREW)
     ownership_type = Column(SQLEnum(OwnershipType, values_callable=lambda x: [e.value for e in x]), nullable=True)
     is_committee_member = Column(Boolean, default=False)
-    has_standing_order = Column(Boolean, default=False)
-    bank_name = Column(String, nullable=True, comment="Bank name for payment matching")
-    bank_account = Column(String, nullable=True, comment="Bank account number")
+    standing_order_start_date = Column(Date, nullable=True, comment="First month this tenant's standing order covers")
+    standing_order_end_date = Column(Date, nullable=True, comment="Last month covered; NULL = ongoing")
+    standing_order_amount = Column(Numeric(10, 2), nullable=True, comment="Monthly amount; required when start_date is set")
     notes = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     move_in_date = Column(

@@ -58,9 +58,11 @@ interface Props {
 }
 
 // ─── Main ──────────────────────────────────────────────────────────────────────
+const PROJECTION_MONTHS = 6;
+
 export default function SummaryTab({ buildingId, range, onGoToExpenses }: Props) {
   const { t } = useTranslation();
-  const { data, isLoading, error } = useBuildingSummary(buildingId, range.from, range.to);
+  const { data, isLoading, error } = useBuildingSummary(buildingId, range.from, range.to, PROJECTION_MONTHS);
 
   if (isLoading) {
     return (

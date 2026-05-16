@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, model_validator
 from datetime import datetime, date
 from typing import Optional
 from uuid import UUID
@@ -14,11 +14,26 @@ class TenantBase(BaseModel):
     language: LanguagePreference = LanguagePreference.HEBREW
     ownership_type: Optional[OwnershipType] = None
     is_committee_member: bool = False
-    has_standing_order: bool = False
-    bank_name: Optional[str] = None
-    bank_account: Optional[str] = None
+    standing_order_start_date: Optional[date] = None
+    standing_order_end_date: Optional[date] = None
+    standing_order_amount: Optional[float] = None
     notes: Optional[str] = None
     is_active: bool = True
+
+    @model_validator(mode="after")
+    def _validate_standing_order(self):
+        if self.standing_order_start_date is not None:
+            if self.standing_order_amount is None or self.standing_order_amount <= 0:
+                raise ValueError(
+                    "standing_order_amount must be > 0 when standing_order_start_date is set"
+                )
+        if (
+            self.standing_order_start_date is not None
+            and self.standing_order_end_date is not None
+            and self.standing_order_end_date < self.standing_order_start_date
+        ):
+            raise ValueError("standing_order_end_date must be >= standing_order_start_date")
+        return self
 
 
 class TenantCreate(TenantBase):
@@ -34,12 +49,22 @@ class TenantUpdate(BaseModel):
     language: Optional[LanguagePreference] = None
     ownership_type: Optional[OwnershipType] = None
     is_committee_member: Optional[bool] = None
-    has_standing_order: Optional[bool] = None
-    bank_name: Optional[str] = None
-    bank_account: Optional[str] = None
+    standing_order_start_date: Optional[date] = None
+    standing_order_end_date: Optional[date] = None
+    standing_order_amount: Optional[float] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
     move_in_date: Optional[date] = None
+
+    @model_validator(mode="after")
+    def _validate_standing_order(self):
+        if (
+            self.standing_order_start_date is not None
+            and self.standing_order_end_date is not None
+            and self.standing_order_end_date < self.standing_order_start_date
+        ):
+            raise ValueError("standing_order_end_date must be >= standing_order_start_date")
+        return self
 
 
 class TenantResponse(TenantBase):

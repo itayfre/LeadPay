@@ -12,12 +12,15 @@ interface Props {
 }
 
 // Tiny sparkline — 40px tall, no axes, pure indicator
-function Sparkline({ data }: { data: { rate: number }[] }) {
+function Sparkline({ data }: { data: { rate: number | null }[] }) {
   if (!data || data.length < 2) return null;
+  // Sparkline only renders historical rate; future entries (rate=null) are skipped
+  const historical = data.filter((d): d is { rate: number } => d.rate !== null);
+  if (historical.length < 2) return null;
   return (
     <div className="w-16 h-8 shrink-0">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
+        <LineChart data={historical} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
           <Line
             type="monotone"
             dataKey="rate"

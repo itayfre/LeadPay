@@ -766,13 +766,15 @@ def get_payment_status(
         else:
             status_str = "unpaid"
 
-        so_active = bool(getattr(apartment, "standing_order_active", False))
-        so_start_m = getattr(apartment, "standing_order_start_month", None)
-        so_start_y = getattr(apartment, "standing_order_start_year", None)
-        if so_active and so_start_y is not None and so_start_m is not None:
-            has_standing_order = (year, month) >= (so_start_y, so_start_m)
+        period_first = date(year, month, 1)
+        so_start = tenant.standing_order_start_date
+        so_end = tenant.standing_order_end_date
+        if so_start is not None and period_first >= so_start and (so_end is None or period_first <= so_end):
+            has_standing_order = True
+            so_amount = float(tenant.standing_order_amount) if tenant.standing_order_amount is not None else None
         else:
-            has_standing_order = so_active
+            has_standing_order = False
+            so_amount = None
 
         tenant_statuses.append({
             "tenant_id": tenant_id,
@@ -790,9 +792,7 @@ def get_payment_status(
             "apartment_id": str(apartment.id),
             "move_in_date": tenant.move_in_date.isoformat(),
             "has_standing_order": has_standing_order,
-            "standing_order_active": so_active,
-            "standing_order_start_month": so_start_m,
-            "standing_order_start_year": so_start_y,
+            "standing_order_amount": so_amount,
             "total_debt": _calculate_tenant_debt_from_map(
                 tenant, apartment, building,
                 dict(historical_paid_by_tenant.get(str(tenant.id), {})),
@@ -936,6 +936,7 @@ def get_summary_stats(
     building_id: UUID,
     from_: str = Query(..., alias="from"),
     to: str = Query(...),
+    projection_months: int = Query(0, ge=0, le=24),
     db: Session = Depends(get_db),
     _: User = Depends(require_viewer_plus),
 ):
@@ -977,6 +978,9 @@ def get_summary_stats(
             Apartment.expected_payment.label("apt_expected"),
             Building.expected_monthly_payment.label("building_default"),
             Tenant.move_in_date.label("move_in_date"),
+            Tenant.standing_order_start_date.label("so_start"),
+            Tenant.standing_order_end_date.label("so_end"),
+            Tenant.standing_order_amount.label("so_amount"),
         )
         .join(Apartment, Tenant.apartment_id == Apartment.id)
         .join(Building, Apartment.building_id == Building.id)
@@ -995,6 +999,9 @@ def get_summary_stats(
             "apt_number": int(r.apt_number) if r.apt_number is not None else 0,
             "expected": apt_exp if apt_exp is not None else bld_def,
             "move_in_date": r.move_in_date,
+            "so_start": r.so_start,
+            "so_end": r.so_end,
+            "so_amount": float(r.so_amount) if r.so_amount is not None else None,
         }
 
     expected_per_month = sum(t["expected"] for t in tenant_meta.values())
@@ -1034,6 +1041,22 @@ def get_summary_stats(
         collected_by_month[(int(r.year), int(r.month))] += amt
         collected_by_tenant[str(r.tenant_id)] += amt
 
+    def _projected_so_total(y: int, m: int) -> float:
+        period_first = _date(y, m, 1)
+        total = 0.0
+        for meta in tenant_meta.values():
+            so_start = meta.get("so_start")
+            so_end = meta.get("so_end")
+            so_amount = meta.get("so_amount")
+            if so_start is None or so_amount is None:
+                continue
+            if period_first < so_start:
+                continue
+            if so_end is not None and period_first > so_end:
+                continue
+            total += so_amount
+        return round(total, 2)
+
     # --- trend per month + avg_collection_rate ---
     rate_samples: List[float] = []
     trend = []
@@ -1047,8 +1070,27 @@ def get_summary_stats(
             "rate": rate,
             "collected": round(coll, 2),
             "expected": round(expected_per_month, 2),
+            "projected_standing_order_income": None,
+            "is_future": False,
         })
     avg_collection_rate = round(sum(rate_samples) / len(rate_samples), 2) if rate_samples else 0.0
+
+    # --- forward projection (sum of active standing orders per future month) ---
+    if projection_months > 0:
+        py, pm = to_y, to_m
+        for _ in range(projection_months):
+            pm += 1
+            if pm == 13:
+                pm = 1
+                py += 1
+            trend.append({
+                "period": f"{py:04d}-{pm:02d}",
+                "rate": None,
+                "collected": None,
+                "expected": round(expected_per_month, 2),
+                "projected_standing_order_income": _projected_so_total(py, pm),
+                "is_future": True,
+            })
 
     # --- open AR (most recent month: expected - collected, clamped >= 0) ---
     last_y, last_m = months[-1]

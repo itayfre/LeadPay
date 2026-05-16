@@ -73,7 +73,14 @@ export interface BuildingSummaryStats {
     income: number;
     expenses: number;
   };
-  trend: { period: string; rate: number; collected: number; expected: number }[];
+  trend: {
+    period: string;
+    rate: number | null;
+    collected: number | null;
+    expected: number;
+    projected_standing_order_income?: number | null;
+    is_future?: boolean;
+  }[];
   expenses_by_category: {
     category_id: string | null;
     name: string;
@@ -108,9 +115,9 @@ export interface Tenant {
   language: 'he' | 'en';
   ownership_type?: 'בעלים' | 'משכיר' | 'שוכר' | null;
   is_committee_member: boolean;
-  has_standing_order: boolean;
-  bank_name?: string;
-  bank_account?: string;
+  standing_order_start_date?: string | null;  // ISO 'YYYY-MM-DD'
+  standing_order_end_date?: string | null;    // ISO 'YYYY-MM-DD'; null = ongoing
+  standing_order_amount?: number | null;       // monthly amount; required when start_date is set
   notes?: string;
   is_active: boolean;
   created_at: string;
@@ -140,9 +147,7 @@ export interface PaymentStatus {
   move_in_date: string;   // ISO date "2026-01-01"
   total_debt: number;
   has_standing_order?: boolean;
-  standing_order_active?: boolean;
-  standing_order_start_month?: number | null;
-  standing_order_start_year?: number | null;
+  standing_order_amount?: number | null;
 }
 
 export interface PaymentStatusResponse {

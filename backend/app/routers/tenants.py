@@ -27,9 +27,6 @@ class ResolveApartmentRequest(BaseModel):
 
 class PatchApartmentRequest(BaseModel):
     expected_payment: Optional[float] = None
-    standing_order_active: Optional[bool] = None
-    standing_order_start_month: Optional[int] = None
-    standing_order_start_year: Optional[int] = None
 
 router = APIRouter(
     prefix="/api/v1/tenants",
@@ -122,9 +119,9 @@ def list_tenants(
             "language": tenant.language.value if hasattr(tenant.language, 'value') else tenant.language,
             "ownership_type": tenant.ownership_type.value if hasattr(tenant.ownership_type, 'value') else tenant.ownership_type,
             "is_committee_member": tenant.is_committee_member,
-            "has_standing_order": tenant.has_standing_order,
-            "bank_name": tenant.bank_name,
-            "bank_account": tenant.bank_account,
+            "standing_order_start_date": tenant.standing_order_start_date.isoformat() if tenant.standing_order_start_date else None,
+            "standing_order_end_date": tenant.standing_order_end_date.isoformat() if tenant.standing_order_end_date else None,
+            "standing_order_amount": float(tenant.standing_order_amount) if tenant.standing_order_amount is not None else None,
             "notes": tenant.notes,
             "is_active": tenant.is_active,
             "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
@@ -281,8 +278,7 @@ async def import_tenants_from_excel(
     """
     Import tenants from an Excel file for a specific building.
     Expected columns: דירה (apartment), קומה (floor), שם (name),
-    טלפון (phone), דואל (email), סוג בעלות (ownership type),
-    שם בנק (bank name), חשבון בנק (bank account)
+    טלפון (phone), דואל (email), סוג בעלות (ownership type)
     """
     # Verify building exists
     building = db.query(Building).filter(Building.id == building_id).first()
@@ -312,8 +308,6 @@ async def import_tenants_from_excel(
         'טלפון': 'phone',
         'דואל': 'email',
         'סוג בעלות': 'ownership_type',
-        'שם בנק': 'bank_name',
-        'חשבון בנק': 'bank_account',
     }
 
     df = df.rename(columns=column_mapping)
@@ -386,10 +380,6 @@ async def import_tenants_from_excel(
                 phone = None
             email = row.get('email') if pd.notna(row.get('email')) else None
 
-            # Map optional bank columns
-            bank_name = str(row.get('bank_name', '')).strip() if pd.notna(row.get('bank_name')) else None
-            bank_account = str(row.get('bank_account', '')).strip() if pd.notna(row.get('bank_account')) else None
-
             tenant = Tenant(
                 apartment_id=apartment.id,
                 building_id=building_id,
@@ -398,8 +388,6 @@ async def import_tenants_from_excel(
                 phone=phone,
                 email=email,
                 ownership_type=ownership_type,
-                bank_name=bank_name,
-                bank_account=bank_account,
                 is_active=True
             )
             db.add(tenant)
@@ -445,19 +433,10 @@ def patch_apartment(
         apartment.expected_payment = (
             float(fields["expected_payment"]) if fields["expected_payment"] is not None else None
         )
-    if "standing_order_active" in fields:
-        apartment.standing_order_active = bool(fields["standing_order_active"])
-    if "standing_order_start_month" in fields:
-        apartment.standing_order_start_month = fields["standing_order_start_month"]
-    if "standing_order_start_year" in fields:
-        apartment.standing_order_start_year = fields["standing_order_start_year"]
 
     db.commit()
     db.refresh(apartment)
     return {
         "apartment_id": str(apartment.id),
         "expected_payment": float(apartment.expected_payment) if apartment.expected_payment is not None else None,
-        "standing_order_active": bool(apartment.standing_order_active),
-        "standing_order_start_month": apartment.standing_order_start_month,
-        "standing_order_start_year": apartment.standing_order_start_year,
     }

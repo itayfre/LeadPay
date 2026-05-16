@@ -276,7 +276,6 @@ export default function AllTenants() {
                       סוג בעלות<SortIcon col="ownership_type" sortColumn={sortColumn} sortDirection={sortDirection} />
                     </th>
                     <th className={thStaticClass}>טלפון</th>
-                    <th className={thStaticClass}>בנק</th>
                     <th className={thStaticClass}>שפה</th>
                     <th className={thStaticClass}>ה.קבע</th>
                     <th onClick={() => handleSort('is_active')} className={thClass}>
@@ -318,16 +317,22 @@ export default function AllTenants() {
                       <td className="px-4 py-3 text-sm text-gray-600" dir="ltr">
                         {tenant.phone || '—'}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-500">
-                        {tenant.bank_name || '—'}
-                      </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex px-2 py-0.5 text-xs rounded ${tenant.language === 'he' ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
                           {tenant.language === 'he' ? 'עב' : 'EN'}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        {tenant.has_standing_order ? '✅' : '—'}
+                        {tenant.standing_order_start_date ? (
+                          <span className="inline-flex flex-col items-end text-xs leading-tight text-sky-700" dir="ltr">
+                            <span className="font-medium">{tenant.standing_order_start_date}</span>
+                            {tenant.standing_order_amount != null && (
+                              <span className="text-sky-600">₪{Math.round(tenant.standing_order_amount).toLocaleString()}</span>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-center">
                         {tenant.is_active ? (
