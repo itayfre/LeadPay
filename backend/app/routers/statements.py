@@ -629,17 +629,41 @@ def get_transaction_review_form(
             detail=f"Transaction with id {transaction_id} not found",
         )
 
-    statement = db.query(BankStatement).filter(
-        BankStatement.id == transaction.statement_id
-    ).first()
-    if not statement:
+    # Resolve owning building. Statement-derived transactions carry statement_id;
+    # manual payments (is_manual=True) do not — derive building from the first
+    # allocation's tenant → apartment instead.
+    statement = None
+    if transaction.statement_id:
+        statement = db.query(BankStatement).filter(
+            BankStatement.id == transaction.statement_id
+        ).first()
+
+    building_id = None
+    if statement:
+        building_id = statement.building_id
+    else:
+        first_alloc = next(
+            (a for a in (transaction.allocations or []) if a.tenant_id is not None),
+            None,
+        )
+        if first_alloc is not None:
+            apt = (
+                db.query(Apartment)
+                .join(Tenant, Tenant.apartment_id == Apartment.id)
+                .filter(Tenant.id == first_alloc.tenant_id)
+                .first()
+            )
+            if apt is not None:
+                building_id = apt.building_id
+
+    if building_id is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Owning statement not found",
+            detail="Unable to resolve owning building for this transaction",
         )
 
     tenants = db.query(Tenant).join(Apartment).filter(
-        Apartment.building_id == statement.building_id,
+        Apartment.building_id == building_id,
         Tenant.is_active == True,
     ).all()
     tenant_map = {str(t.id): t.name for t in tenants}
@@ -685,7 +709,7 @@ def get_transaction_review_form(
     return {
         'tx': tx_payload,
         'all_tenants': all_tenants,
-        'building_id': str(statement.building_id),
+        'building_id': str(building_id),
     }
 
 
