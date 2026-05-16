@@ -425,9 +425,22 @@ export const tenantsAPI = {
 };
 
 // Apartments API
+export interface ApartmentPatchBody {
+  expected_payment?: number | null;
+  standing_order_active?: boolean;
+  standing_order_start_month?: number | null;
+  standing_order_start_year?: number | null;
+}
+export interface ApartmentPatchResponse {
+  apartment_id: string;
+  expected_payment: number | null;
+  standing_order_active: boolean;
+  standing_order_start_month: number | null;
+  standing_order_start_year: number | null;
+}
 export const apartmentsAPI = {
-  patch: (apartmentId: string, data: { expected_payment: number | null }) =>
-    fetchAPI<{ apartment_id: string; expected_payment: number | null }>(
+  patch: (apartmentId: string, data: ApartmentPatchBody) =>
+    fetchAPI<ApartmentPatchResponse>(
       `/api/v1/tenants/apartments/${apartmentId}`,
       {
         method: 'PATCH',

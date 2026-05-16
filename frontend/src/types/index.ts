@@ -139,6 +139,10 @@ export interface PaymentStatus {
   apartment_id: string;
   move_in_date: string;   // ISO date "2026-01-01"
   total_debt: number;
+  has_standing_order?: boolean;
+  standing_order_active?: boolean;
+  standing_order_start_month?: number | null;
+  standing_order_start_year?: number | null;
 }
 
 export interface PaymentStatusResponse {

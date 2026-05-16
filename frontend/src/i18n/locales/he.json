@@ -46,7 +46,45 @@
     "paid": "שולם",
     "status": "סטטוס",
     "actions": "פעולות",
-    "sendWhatsApp": "שלח הודעה"
+    "sendWhatsApp": "שלח הודעה",
+    "monthlyExpected": "תשלום חודשי",
+    "currentDebt": "חוב נוכחי",
+    "totalPaid": "שולם",
+    "balance": "יתרה",
+    "annualExpected": "תשלום שנתי"
+  },
+  "collection": {
+    "viewTable": "📋 טבלה",
+    "viewMatrix": "🗓 מטריצה שנתית",
+    "matrixShowingYear": "מציג ינואר–דצמבר {{year}}",
+    "matrix": {
+      "prevYear": "שנה קודמת",
+      "nextYear": "שנה הבאה"
+    },
+    "matrixLegend": {
+      "title": "מקרא",
+      "paid": "שולם — לחץ לעריכה",
+      "partial": "חלקי",
+      "overdue": "חוב — חודש שעבר",
+      "future": "טרם הגיע מועד",
+      "standingOrder": "הוראת קבע פעילה",
+      "empty": "אין ציפייה"
+    },
+    "cell": {
+      "editPayment": "לחץ לעריכת התשלום",
+      "addPayment": "לחץ לרישום תשלום",
+      "prepay": "לחץ להוספת תשלום מוקדם",
+      "completePartial": "תשלום חלקי — לחץ להשלמה"
+    },
+    "standingOrder": {
+      "title": "הוראת קבע",
+      "active": "הוראת קבע פעילה",
+      "enable": "הפעל הוראת קבע",
+      "toggle": "החלף מצב הוראת קבע",
+      "activeLabel": "הוראת קבע פעילה לדייר זה",
+      "startFrom": "החל מחודש",
+      "expectedTooltip": "הוראת קבע — צפוי להיגבות"
+    }
   },
   "buildings": {
     "addBuilding": "הוסף בניין",

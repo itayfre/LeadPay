@@ -766,6 +766,14 @@ def get_payment_status(
         else:
             status_str = "unpaid"
 
+        so_active = bool(getattr(apartment, "standing_order_active", False))
+        so_start_m = getattr(apartment, "standing_order_start_month", None)
+        so_start_y = getattr(apartment, "standing_order_start_year", None)
+        if so_active and so_start_y is not None and so_start_m is not None:
+            has_standing_order = (year, month) >= (so_start_y, so_start_m)
+        else:
+            has_standing_order = so_active
+
         tenant_statuses.append({
             "tenant_id": tenant_id,
             "tenant_name": tenant.name,
@@ -781,6 +789,10 @@ def get_payment_status(
             "language": tenant.language.value if tenant.language else "he",
             "apartment_id": str(apartment.id),
             "move_in_date": tenant.move_in_date.isoformat(),
+            "has_standing_order": has_standing_order,
+            "standing_order_active": so_active,
+            "standing_order_start_month": so_start_m,
+            "standing_order_start_year": so_start_y,
             "total_debt": _calculate_tenant_debt_from_map(
                 tenant, apartment, building,
                 dict(historical_paid_by_tenant.get(str(tenant.id), {})),

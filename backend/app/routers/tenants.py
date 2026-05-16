@@ -27,6 +27,9 @@ class ResolveApartmentRequest(BaseModel):
 
 class PatchApartmentRequest(BaseModel):
     expected_payment: Optional[float] = None
+    standing_order_active: Optional[bool] = None
+    standing_order_start_month: Optional[int] = None
+    standing_order_start_year: Optional[int] = None
 
 router = APIRouter(
     prefix="/api/v1/tenants",
@@ -436,14 +439,25 @@ def patch_apartment(
     if not apartment:
         raise HTTPException(status_code=404, detail=f"Apartment {apartment_id} not found")
 
-    if data.expected_payment is not None:
-        apartment.expected_payment = float(data.expected_payment)
-    else:
-        apartment.expected_payment = None
+    fields = data.model_dump(exclude_unset=True)
+
+    if "expected_payment" in fields:
+        apartment.expected_payment = (
+            float(fields["expected_payment"]) if fields["expected_payment"] is not None else None
+        )
+    if "standing_order_active" in fields:
+        apartment.standing_order_active = bool(fields["standing_order_active"])
+    if "standing_order_start_month" in fields:
+        apartment.standing_order_start_month = fields["standing_order_start_month"]
+    if "standing_order_start_year" in fields:
+        apartment.standing_order_start_year = fields["standing_order_start_year"]
 
     db.commit()
     db.refresh(apartment)
     return {
         "apartment_id": str(apartment.id),
         "expected_payment": float(apartment.expected_payment) if apartment.expected_payment is not None else None,
+        "standing_order_active": bool(apartment.standing_order_active),
+        "standing_order_start_month": apartment.standing_order_start_month,
+        "standing_order_start_year": apartment.standing_order_start_year,
     }

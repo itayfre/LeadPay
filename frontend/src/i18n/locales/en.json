@@ -46,7 +46,45 @@
     "paid": "Paid",
     "status": "Status",
     "actions": "Actions",
-    "sendWhatsApp": "Send Message"
+    "sendWhatsApp": "Send Message",
+    "monthlyExpected": "Monthly",
+    "currentDebt": "Current debt",
+    "totalPaid": "Paid",
+    "balance": "Balance",
+    "annualExpected": "Annual"
+  },
+  "collection": {
+    "viewTable": "📋 Table",
+    "viewMatrix": "🗓 Annual matrix",
+    "matrixShowingYear": "Showing January–December {{year}}",
+    "matrix": {
+      "prevYear": "Previous year",
+      "nextYear": "Next year"
+    },
+    "matrixLegend": {
+      "title": "Legend",
+      "paid": "Paid — click to edit",
+      "partial": "Partial",
+      "overdue": "Overdue",
+      "future": "Not yet due",
+      "standingOrder": "Standing order active",
+      "empty": "No expectation"
+    },
+    "cell": {
+      "editPayment": "Click to edit payment",
+      "addPayment": "Click to record payment",
+      "prepay": "Click to add prepayment",
+      "completePartial": "Partial — click to complete"
+    },
+    "standingOrder": {
+      "title": "Standing order",
+      "active": "Standing order active",
+      "enable": "Enable standing order",
+      "toggle": "Toggle standing order",
+      "activeLabel": "Standing order active for this tenant",
+      "startFrom": "Start from",
+      "expectedTooltip": "Standing order — expected"
+    }
   },
   "buildings": {
     "addBuilding": "Add Building",

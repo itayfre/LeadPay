@@ -1,14 +1,16 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { paymentsAPI, tenantsAPI, messagesAPI, apartmentsAPI, statementsAPI } from '../../services/api';
 import type { PaymentStatus, WhatsAppMessage, TenantPaymentHistory } from '../../types';
 import type { DateRange, MonthYear } from '../../hooks/useBuildingPeriodRange';
 import { expandRange } from '../../hooks/useBuildingPeriodRange';
+import { useCollectionViewMode } from '../../hooks/useCollectionViewMode';
 import { useAuth } from '../../context/AuthContext';
 import TransactionEditModal from '../modals/TransactionEditModal';
 import ConfirmDialog from '../modals/ConfirmDialog';
 import AllocationDrawer from '../modals/AllocationDrawer';
+import CollectionMatrixView from './CollectionMatrixView';
 
 // ─── Sub-types ────────────────────────────────────────────────────────────────
 
@@ -24,6 +26,10 @@ interface AggregatedTenant {
   total_debt: number;
   status: 'paid' | 'partial' | 'unpaid';
   months: Array<PaymentStatus & { period_label: string }>;
+  standing_order_active?: boolean;
+  standing_order_start_month?: number | null;
+  standing_order_start_year?: number | null;
+  move_in_date?: string;
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -474,6 +480,91 @@ function PaymentHistoryModal({
   );
 }
 
+// ─── StandingOrderModal ───────────────────────────────────────────────────────
+
+function StandingOrderModal({
+  tenant,
+  todayMonth,
+  saving,
+  onClose,
+  onSave,
+}: {
+  tenant: AggregatedTenant;
+  todayMonth: MonthYear;
+  saving: boolean;
+  onClose: () => void;
+  onSave: (active: boolean, startMonth: number | null, startYear: number | null) => void;
+}) {
+  const { t } = useTranslation();
+  const [active, setActive] = useState<boolean>(tenant.standing_order_active ?? false);
+  const [startMonth, setStartMonth] = useState<number>(tenant.standing_order_start_month ?? todayMonth.month);
+  const [startYear, setStartYear] = useState<number>(tenant.standing_order_start_year ?? todayMonth.year);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" dir="rtl">
+      <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6 space-y-4">
+        <div>
+          <h3 className="text-lg font-bold text-gray-900">{t('collection.standingOrder.title')}</h3>
+          <p className="text-sm text-gray-500 mt-1">
+            {tenant.tenant_name} · {t('payment.apartment')} {tenant.apartment_number}
+          </p>
+        </div>
+
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={active}
+            onChange={(e) => setActive(e.target.checked)}
+            className="w-4 h-4 accent-sky-600"
+          />
+          <span className="text-sm font-medium text-gray-700">{t('collection.standingOrder.activeLabel')}</span>
+        </label>
+
+        {active && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-gray-700">{t('collection.standingOrder.startFrom')}</p>
+            <div className="flex gap-2">
+              <select
+                value={startMonth}
+                onChange={(e) => setStartMonth(Number(e.target.value))}
+                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500"
+              >
+                {HE_MONTHS.map((m, i) => (
+                  <option key={i + 1} value={i + 1}>{m}</option>
+                ))}
+              </select>
+              <input
+                type="number"
+                value={startYear}
+                onChange={(e) => setStartYear(Number(e.target.value))}
+                className="w-24 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 tabular-nums"
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-3 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+          >
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            onClick={() => onSave(active, active ? startMonth : null, active ? startYear : null)}
+            disabled={saving}
+            className="flex-1 px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 disabled:opacity-50 font-semibold"
+          >
+            {saving ? t('common.saving') : t('common.save')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function CollectionTab({ buildingId, range }: Props) {
@@ -499,16 +590,42 @@ export default function CollectionTab({ buildingId, range }: Props) {
   const [sortColumn, setSortColumn] = useState<SortCol>('apartment_number');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
+  // Matrix view state
+  const [viewMode, setViewMode] = useCollectionViewMode();
+  const [matrixYear, setMatrixYear] = useState<number>(range.to.year);
+  const [targetPaymentMonth, setTargetPaymentMonth] = useState<MonthYear | null>(null);
+  const [pendingEditCell, setPendingEditCell] = useState<{ tenantId: string; month: number; year: number } | null>(null);
+  const [standingOrderEditFor, setStandingOrderEditFor] = useState<AggregatedTenant | null>(null);
+  const [savingStandingOrder, setSavingStandingOrder] = useState(false);
+
   // ── Derived range info ─────────────────────────────────────────────────────
-  const monthList = useMemo(() => expandRange(range.from, range.to), [range]);
+  const effectiveRange: DateRange = useMemo(() => {
+    if (viewMode === 'matrix') {
+      return {
+        from: { month: 1, year: matrixYear },
+        to: { month: 12, year: matrixYear },
+      };
+    }
+    return range;
+  }, [viewMode, matrixYear, range]);
+
+  const monthList = useMemo(
+    () => expandRange(effectiveRange.from, effectiveRange.to),
+    [effectiveRange]
+  );
   const isSingle = monthList.length === 1;
 
-  // For manual payment modal, use the last month in the range
-  const paymentMonth = range.to;
+  // For manual payment modal, use targetPaymentMonth if set (matrix cell click), else last month in range
+  const paymentMonth: MonthYear = targetPaymentMonth ?? effectiveRange.to;
+
+  const todayMonth: MonthYear = useMemo(() => {
+    const now = new Date();
+    return { month: now.getMonth() + 1, year: now.getFullYear() };
+  }, []);
 
   // ── Data fetching ──────────────────────────────────────────────────────────
   const { data: allMonthsData, isLoading } = useQuery({
-    queryKey: ['paymentStatus', buildingId, range.from, range.to],
+    queryKey: ['paymentStatus', buildingId, effectiveRange.from, effectiveRange.to],
     queryFn: () =>
       Promise.all(monthList.map((m) => paymentsAPI.getStatus(buildingId, m.month, m.year))),
     enabled: !!buildingId,
@@ -543,12 +660,20 @@ export default function CollectionTab({ buildingId, range }: Props) {
             total_debt: 0,
             status: 'unpaid',
             months: [],
+            standing_order_active: p.standing_order_active,
+            standing_order_start_month: p.standing_order_start_month,
+            standing_order_start_year: p.standing_order_start_year,
+            move_in_date: p.move_in_date,
           });
         }
         const agg = byId.get(p.tenant_id)!;
         agg.total_expected += p.expected_amount;
         agg.total_paid += p.paid_amount;
         agg.total_debt = p.total_debt; // always overwrite with latest
+        // Keep standing-order flags fresh from latest period
+        agg.standing_order_active = p.standing_order_active;
+        agg.standing_order_start_month = p.standing_order_start_month;
+        agg.standing_order_start_year = p.standing_order_start_year;
         agg.months.push({ ...p, period_label: label });
       });
     });
@@ -619,7 +744,67 @@ export default function CollectionTab({ buildingId, range }: Props) {
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId, range.from, range.to] });
+    queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId] });
+    queryClient.invalidateQueries({ queryKey: ['tenantHistory'] });
+  };
+
+  const handleMatrixCellClick = (
+    tenant: AggregatedTenant,
+    month: MonthYear,
+    monthData: PaymentStatus | null,
+  ) => {
+    setTargetPaymentMonth(month);
+    if (monthData && monthData.status === 'paid') {
+      // Open AllocationDrawer for the transaction(s) that paid this cell
+      setPendingEditCell({ tenantId: tenant.tenant_id, month: month.month, year: month.year });
+      setHistoryTenantId(tenant.tenant_id);
+      return;
+    }
+    const expected = monthData?.expected_amount ?? (tenant.months[0]?.expected_amount ?? 0);
+    const paid = monthData?.paid_amount ?? 0;
+    const remaining = Math.max(expected - paid, 0);
+    setManualPaymentFor(tenant);
+    setManualAmount(String(remaining || expected || 0));
+    setManualNote('');
+  };
+
+  // When tenant history loads for a matrix-edit click, find the matching tx and open AllocationDrawer
+  useEffect(() => {
+    if (!pendingEditCell) return;
+    if (!tenantHistory || tenantHistory.tenant_id !== pendingEditCell.tenantId) return;
+    const m = tenantHistory.months.find(
+      (x) => x.month === pendingEditCell.month && x.year === pendingEditCell.year
+    );
+    const firstTx = m?.transactions?.find((t) => !!t.id);
+    if (firstTx?.id) {
+      setAllocationEditorTxId(firstTx.id);
+    }
+    // Clear history modal trigger so it doesn't pop up
+    setHistoryTenantId(null);
+    setPendingEditCell(null);
+  }, [pendingEditCell, tenantHistory]);
+
+  const handleStandingOrderClick = (tenant: AggregatedTenant) => {
+    setStandingOrderEditFor(tenant);
+  };
+
+  const handleSaveStandingOrder = async (
+    active: boolean,
+    startMonth: number | null,
+    startYear: number | null,
+  ) => {
+    if (!standingOrderEditFor) return;
+    setSavingStandingOrder(true);
+    try {
+      await apartmentsAPI.patch(standingOrderEditFor.apartment_id, {
+        standing_order_active: active,
+        standing_order_start_month: active ? startMonth : null,
+        standing_order_start_year: active ? startYear : null,
+      });
+      invalidate();
+      setStandingOrderEditFor(null);
+    } catch { /* ignore */ }
+    finally { setSavingStandingOrder(false); }
   };
 
   const handleToggleLanguage = async (tenant: AggregatedTenant) => {
@@ -679,6 +864,7 @@ export default function CollectionTab({ buildingId, range }: Props) {
       });
       invalidate();
       setRevertConfirm(null);
+      setTargetPaymentMonth(null);
     } catch { /* ignore */ }
     finally { setSavingManual(false); }
   };
@@ -699,6 +885,7 @@ export default function CollectionTab({ buildingId, range }: Props) {
       setManualPaymentFor(null);
       setManualAmount('');
       setManualNote('');
+      setTargetPaymentMonth(null);
     } catch { /* ignore */ }
     finally { setSavingManual(false); }
   };
@@ -734,8 +921,55 @@ export default function CollectionTab({ buildingId, range }: Props) {
 
   return (
     <div className="space-y-5" dir="rtl">
-      {/* Send reminders button */}
-      <div className="flex justify-end">
+      {/* Toolbar: view toggle + (matrix year stepper) + send reminders */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex bg-slate-100 rounded-lg p-1 text-sm font-medium">
+          <button
+            type="button"
+            aria-pressed={viewMode === 'table'}
+            onClick={() => setViewMode('table')}
+            className={`px-3 py-1.5 rounded-md transition-colors ${
+              viewMode === 'table'
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            {t('collection.viewTable')}
+          </button>
+          <button
+            type="button"
+            aria-pressed={viewMode === 'matrix'}
+            onClick={() => setViewMode('matrix')}
+            className={`px-3 py-1.5 rounded-md transition-colors ${
+              viewMode === 'matrix'
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            {t('collection.viewMatrix')}
+          </button>
+        </div>
+
+        {viewMode === 'matrix' && (
+          <div className="flex items-center gap-3 text-sm">
+            <button
+              type="button"
+              onClick={() => setMatrixYear((y) => y - 1)}
+              className="w-7 h-7 rounded-md border border-slate-200 hover:bg-slate-50 text-slate-600"
+              aria-label={t('collection.matrix.prevYear')}
+            >◀</button>
+            <span className="font-semibold text-slate-900 tabular-nums">
+              {t('collection.matrixShowingYear', { year: matrixYear })}
+            </span>
+            <button
+              type="button"
+              onClick={() => setMatrixYear((y) => y + 1)}
+              className="w-7 h-7 rounded-md border border-slate-200 hover:bg-slate-50 text-slate-600"
+              aria-label={t('collection.matrix.nextYear')}
+            >▶</button>
+          </div>
+        )}
+
         <button
           onClick={handleGenerateReminders}
           className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors font-medium text-sm"
@@ -755,7 +989,28 @@ export default function CollectionTab({ buildingId, range }: Props) {
         <StatCard title={t('dashboard.collectionRate')} value={Math.round(collectionRateNum) + '%'} color="purple" icon="📊" />
       </div>
 
+      {/* Matrix view */}
+      {viewMode === 'matrix' && (
+        <CollectionMatrixView
+          tenants={sorted}
+          monthList={monthList}
+          todayMonth={todayMonth}
+          moveInByApartment={Object.fromEntries(
+            sorted.map((t) => {
+              if (!t.move_in_date) return [t.apartment_id, null];
+              const d = new Date(t.move_in_date);
+              return [t.apartment_id, { year: d.getFullYear(), month: d.getMonth() + 1 }];
+            })
+          )}
+          onCellClick={handleMatrixCellClick}
+          onTenantClick={(t) => { setHistoryTenantId(t.tenant_id); setSelectedHistoryMonth(null); }}
+          onStandingOrderClick={handleStandingOrderClick}
+          highlightCell={targetPaymentMonth ? { tenantId: manualPaymentFor?.tenant_id ?? '', month: targetPaymentMonth.month, year: targetPaymentMonth.year } : null}
+        />
+      )}
+
       {/* Payment table */}
+      {viewMode === 'table' && (
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
@@ -937,6 +1192,18 @@ export default function CollectionTab({ buildingId, range }: Props) {
           </table>
         </div>
       </div>
+      )}
+
+      {/* Standing Order Edit Modal */}
+      {standingOrderEditFor && (
+        <StandingOrderModal
+          tenant={standingOrderEditFor}
+          todayMonth={todayMonth}
+          saving={savingStandingOrder}
+          onClose={() => setStandingOrderEditFor(null)}
+          onSave={handleSaveStandingOrder}
+        />
+      )}
 
       {/* Manual Payment Modal */}
       {manualPaymentFor && (
@@ -970,7 +1237,7 @@ export default function CollectionTab({ buildingId, range }: Props) {
               />
             </div>
             <div className="flex gap-3 pt-2">
-              <button onClick={() => setManualPaymentFor(null)} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">ביטול</button>
+              <button onClick={() => { setManualPaymentFor(null); setTargetPaymentMonth(null); }} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">ביטול</button>
               <button
                 onClick={handleManualPayment}
                 disabled={!manualAmount || isNaN(parseFloat(manualAmount)) || parseFloat(manualAmount) <= 0 || savingManual}
@@ -995,7 +1262,7 @@ export default function CollectionTab({ buildingId, range }: Props) {
             </p>
             <div className="flex gap-3 pt-2">
               <button
-                onClick={() => setRevertConfirm(null)}
+                onClick={() => { setRevertConfirm(null); setTargetPaymentMonth(null); }}
                 className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
               >
                 ביטול
