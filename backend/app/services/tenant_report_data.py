@@ -4,6 +4,13 @@ Mirrors report_data.py but scoped to a single tenant.
 """
 import datetime as dt
 from typing import Optional
+from uuid import UUID
+
+from sqlalchemy.orm import Session, joinedload
+
+from ..models import Apartment, Tenant, Building
+from ..models.transaction import Transaction, TransactionType
+from ..models.transaction_allocation import TransactionAllocation
 
 HEB_MONTHS = [
     "ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני",
@@ -58,82 +65,79 @@ def _compute_summary(
     }
 
 
-from uuid import UUID
-from sqlalchemy.orm import Session
-
-from ..models import Apartment, Tenant, Building
-from ..models.transaction import Transaction, TransactionType
-from ..models.transaction_allocation import TransactionAllocation
-
-
 def _expected_for_apartment(apt: Apartment, building_default: float) -> float:
     return float(apt.expected_payment) if apt.expected_payment is not None else building_default
 
 
-def _lifetime_debt(db: Session, tenant: Tenant, apt: Apartment, building: Building) -> float:
-    """Total expected since move_in_date minus total paid ever."""
+def _lifetime_debt(
+    tenant: Tenant,
+    apt: Apartment,
+    building: Building,
+    total_paid: float,
+) -> float:
+    """Total expected since move_in_date minus the total paid amount provided by the caller."""
+    if tenant.move_in_date is None:
+        return 0.0
     today = dt.date.today()
-    move_in = tenant.move_in_date or dt.date(2026, 1, 1)
-    if move_in > today:
+    if tenant.move_in_date > today:
         return 0.0
 
-    months_elapsed = (today.year - move_in.year) * 12 + (today.month - move_in.month) + 1
-    expected_per_month = _expected_for_apartment(apt, float(building.expected_monthly_payment or 0))
-    total_expected = months_elapsed * expected_per_month
-
-    paid_rows = (
-        db.query(TransactionAllocation.amount)
-        .join(Transaction, TransactionAllocation.transaction_id == Transaction.id)
-        .filter(
-            TransactionAllocation.tenant_id == tenant.id,
-            Transaction.transaction_type == TransactionType.PAYMENT,
-        )
-        .all()
+    months_elapsed = (
+        (today.year - tenant.move_in_date.year) * 12
+        + (today.month - tenant.move_in_date.month)
+        + 1
     )
-    total_paid = sum(float(a) for (a,) in paid_rows)
-    return max(total_expected - total_paid, 0.0)
+    expected_per_month = _expected_for_apartment(apt, float(building.expected_monthly_payment or 0))
+    return max(months_elapsed * expected_per_month - total_paid, 0.0)
 
 
 def build_tenant_report_payload(
     db: Session, tenant_id: UUID, from_date: dt.date, to_date: dt.date
 ) -> dict:
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    tenant = (
+        db.query(Tenant)
+        .options(joinedload(Tenant.apartment), joinedload(Tenant.building))
+        .filter(Tenant.id == tenant_id)
+        .first()
+    )
     if not tenant:
         raise ValueError(f"Tenant {tenant_id} not found")
-    apt = db.query(Apartment).filter(Apartment.id == tenant.apartment_id).first()
+    apt = tenant.apartment
     if not apt:
         raise ValueError(f"Apartment for tenant {tenant_id} not found")
-    building = db.query(Building).filter(Building.id == tenant.building_id).first()
+    building = tenant.building
     if not building:
         raise ValueError(f"Building for tenant {tenant_id} not found")
 
     expected_per_month = _expected_for_apartment(apt, float(building.expected_monthly_payment or 0))
     months_yyyymm = _period_months(from_date, to_date, tenant.move_in_date)
 
-    # Payment allocations to this tenant in the period — join to Transaction
-    # because transaction_type lives on the parent transaction row.
-    allocs = (
-        db.query(TransactionAllocation)
+    # Single join: every PAYMENT allocation for this tenant, paired with its
+    # parent Transaction. Used for both lifetime totals and the per-period rows.
+    alloc_rows = (
+        db.query(TransactionAllocation, Transaction)
         .join(Transaction, TransactionAllocation.transaction_id == Transaction.id)
         .filter(
             TransactionAllocation.tenant_id == tenant.id,
             Transaction.transaction_type == TransactionType.PAYMENT,
-            TransactionAllocation.period_year.isnot(None),
-            TransactionAllocation.period_month.isnot(None),
         )
         .all()
     )
-    in_range_months = set(months_yyyymm)
+    lifetime_paid = sum(float(a.amount) for (a, _t) in alloc_rows)
+
+    in_range_keys = set(months_yyyymm)
     in_range = [
-        a for a in allocs
-        if (a.period_year, a.period_month) in in_range_months
+        (a, t) for (a, t) in alloc_rows
+        if a.period_year is not None
+        and a.period_month is not None
+        and (a.period_year, a.period_month) in in_range_keys
     ]
-    period_paid = sum(float(a.amount) for a in in_range)
+    period_paid = sum(float(a.amount) for (a, _t) in in_range)
     period_expected = expected_per_month * len(months_yyyymm)
 
     # Per-month rows.
     paid_by_month: dict[tuple[int, int], float] = {}
-    for a in in_range:
+    for (a, _t) in in_range:
         key = (a.period_year, a.period_month)
         paid_by_month[key] = paid_by_month.get(key, 0.0) + float(a.amount)
 
@@ -157,34 +161,28 @@ def build_tenant_report_payload(
             "status": status,
         })
 
-    # Transaction-level rows, sorted by date desc.
-    tx_ids = [a.transaction_id for a in in_range]
-    transactions_payload = []
-    if tx_ids:
-        txs = (
-            db.query(Transaction)
-            .filter(Transaction.id.in_(tx_ids))
-            .all()
-        )
-        tx_by_id = {t.id: t for t in txs}
-        for a in in_range:
-            t = tx_by_id.get(a.transaction_id)
-            if t is None:
-                continue
-            transactions_payload.append({
-                "date": (t.activity_date.isoformat() if t.activity_date else ""),
-                "amount": float(a.amount),
-                "description": t.description or "",
-                "is_manual": bool(getattr(t, "is_manual", False)),
-                "period_month": a.period_month,
-                "period_year": a.period_year,
-            })
-        transactions_payload.sort(key=lambda r: r["date"], reverse=True)
+    # Transaction rows from the in-range set, sorted by activity_date desc.
+    in_range_sorted = sorted(
+        in_range,
+        key=lambda pair: pair[1].activity_date or dt.datetime.min,
+        reverse=True,
+    )
+    transactions_payload = [
+        {
+            "date": (t.activity_date.isoformat() if t.activity_date else ""),
+            "amount": float(a.amount),
+            "description": t.description or "",
+            "is_manual": bool(t.is_manual),
+            "period_month": a.period_month,
+            "period_year": a.period_year,
+        }
+        for (a, t) in in_range_sorted
+    ]
 
     summary = _compute_summary(
         period_expected=period_expected,
         period_paid=period_paid,
-        lifetime_debt=_lifetime_debt(db, tenant, apt, building),
+        lifetime_debt=_lifetime_debt(tenant, apt, building, lifetime_paid),
         tx_count=len(transactions_payload),
     )
 
