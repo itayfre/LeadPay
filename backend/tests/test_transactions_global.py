@@ -160,6 +160,66 @@ def test_list_filters_by_match_status():
     assert "unmatched-row" in descs and "confirmed-row" not in descs
 
 
+def test_split_transaction_is_treated_as_resolved_not_unmatched():
+    """A multi-tenant split has matched_tenant_id=NULL but is_confirmed=True.
+    It must NOT appear under match_status=unmatched, but must appear under
+    match_status=split and surface allocation labels in the response."""
+    b = _new_building()
+    t1 = _new_tenant(b, full_name="גיא מן")
+    t2 = _new_tenant(b, full_name="שרה כהן")
+
+    # Seed a transaction that simulates a saved split: confirmed, no FK, two allocations
+    db = SessionLocal()
+    try:
+        from app.models.transaction_allocation import TransactionAllocation
+        statement = BankStatement(
+            building_id=uuid.UUID(b),
+            original_filename="upload.xlsx",
+            period_month=1,
+            period_year=2026,
+        )
+        db.add(statement)
+        db.flush()
+        tx = Transaction(
+            statement_id=statement.id,
+            activity_date=datetime.utcnow(),
+            description="הפקדת שיק מפוצלת",
+            credit_amount=Decimal("4000"),
+            transaction_type=TransactionType.PAYMENT,
+            matched_tenant_id=None,
+            is_confirmed=True,
+            match_method=MatchMethod.MANUAL,
+            match_confidence=1.0,
+        )
+        db.add(tx)
+        db.flush()
+        db.add(TransactionAllocation(
+            transaction_id=tx.id, tenant_id=uuid.UUID(t1), amount=Decimal("2500"),
+        ))
+        db.add(TransactionAllocation(
+            transaction_id=tx.id, tenant_id=uuid.UUID(t2), amount=Decimal("1500"),
+        ))
+        db.commit()
+        tx_id = str(tx.id)
+    finally:
+        db.close()
+
+    # unmatched filter must NOT include the split row (the previous bug)
+    unmatched = client.get(f"/api/v1/transactions/?building_id={b}&match_status=unmatched").json()
+    assert tx_id not in [i["id"] for i in unmatched["items"]]
+
+    # split filter MUST include it
+    splits = client.get(f"/api/v1/transactions/?building_id={b}&match_status=split").json()
+    items = [i for i in splits["items"] if i["id"] == tx_id]
+    assert len(items) == 1
+    row = items[0]
+    assert row["is_confirmed"] is True
+    assert row["matched_tenant_id"] is None
+    assert row["allocations_summary"]["count"] == 2
+    # Allocation labels should expose both tenant names so the UI can render "גיא + שרה"
+    assert set(row["allocations_summary"]["labels"]) == {"גיא", "שרה"}
+
+
 def test_list_filters_by_date_range():
     b = _new_building()
     today = datetime.utcnow()

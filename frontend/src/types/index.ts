@@ -274,6 +274,7 @@ export interface TransactionRow {
     count: number;
     total: number;
     top_label: string | null;
+    labels: string[];
   };
 }
 
@@ -284,7 +285,7 @@ export interface TransactionsListResponse {
   page_size: number;
 }
 
-export type TransactionMatchStatus = 'confirmed' | 'auto' | 'unmatched' | 'ignored';
+export type TransactionMatchStatus = 'confirmed' | 'split' | 'auto' | 'unmatched' | 'ignored';
 export type TransactionSource = 'bank' | 'manual';
 export type TransactionDirection = 'credit' | 'debit' | 'both';
 

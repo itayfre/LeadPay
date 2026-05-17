@@ -253,9 +253,9 @@ export const statementsAPI = {
       `/api/v1/statements/transactions/${transactionId}/review-form`
     ),
 
-  manualMatch: (transactionId: string, tenantId: string) =>
+  manualMatch: (transactionId: string, tenantId: string, remember = false) =>
     fetchAPI<any>(
-      `/api/v1/statements/transactions/${transactionId}/match/${tenantId}`,
+      `/api/v1/statements/transactions/${transactionId}/match/${tenantId}${remember ? '?remember=true' : ''}`,
       { method: 'POST' }
     ),
 

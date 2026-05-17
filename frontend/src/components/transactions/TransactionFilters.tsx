@@ -15,6 +15,7 @@ interface Props {
 
 const MATCH_STATUS_OPTIONS: { value: TransactionMatchStatus; label: string }[] = [
   { value: 'confirmed', label: '✅ אושר' },
+  { value: 'split', label: '✅ פיצול' },
   { value: 'auto', label: '🤖 התאמה אוטומטית' },
   { value: 'unmatched', label: '⚪ לא מותאם' },
   { value: 'ignored', label: '🚫 מתעלם' },

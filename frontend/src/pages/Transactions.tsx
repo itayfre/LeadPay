@@ -5,6 +5,8 @@ import ConfirmDialog from '../components/modals/ConfirmDialog';
 import TransactionFilters from '../components/transactions/TransactionFilters';
 import TransactionEditDialog from '../components/transactions/TransactionEditDialog';
 import AddTransactionModal from '../components/transactions/AddTransactionModal';
+import QuickMatchPopover from '../components/transactions/QuickMatchPopover';
+import AllocationDrawer from '../components/modals/AllocationDrawer';
 import { transactionsAPI, statementsAPI } from '../services/api';
 import type { TransactionRow, TransactionsListParams } from '../types';
 
@@ -45,7 +47,15 @@ function formatAmount(row: TransactionRow): { value: string; color: string } {
 }
 
 function MatchStatusBadge({ row }: { row: TransactionRow }) {
-  if (row.is_confirmed) {
+  // Split: confirmed but no single matched_tenant_id — the allocations table holds multiple tenants
+  if (row.is_confirmed && !row.matched_tenant_id && row.allocations_summary.count >= 2) {
+    return (
+      <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-purple-100 text-purple-800">
+        ✅ פיצול ({row.allocations_summary.count})
+      </span>
+    );
+  }
+  if (row.is_confirmed && row.matched_tenant_id) {
     return <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-800">✅ אושר</span>;
   }
   if (row.matched_tenant_id) {
@@ -63,6 +73,27 @@ function MatchStatusBadge({ row }: { row: TransactionRow }) {
     return <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600">🚫 מתעלם</span>;
   }
   return <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-red-50 text-red-700">⚪ לא מותאם</span>;
+}
+
+/** Renders the "Matched tenant" cell — handles single match, split, and unmatched. */
+function TenantCell({ row }: { row: TransactionRow }) {
+  if (row.matched_tenant_name) {
+    return <span className="text-sm text-gray-700">{row.matched_tenant_name}</span>;
+  }
+  if (row.is_confirmed && row.allocations_summary.count >= 2) {
+    const labels = row.allocations_summary.labels;
+    const first = labels[0] ?? '—';
+    const extra = labels.length - 1;
+    return (
+      <span
+        className="text-sm text-purple-700"
+        title={labels.join(' · ')}
+      >
+        {first}{extra > 0 ? ` +${extra}` : ''}
+      </span>
+    );
+  }
+  return <span className="text-sm text-gray-400">—</span>;
 }
 
 function TypeBadge({ type }: { type: string | null }) {
@@ -93,6 +124,8 @@ export default function Transactions() {
   const [view, setView] = useState<ViewMode>(loadInitialView);
   const [editRow, setEditRow] = useState<TransactionRow | null>(null);
   const [deleteRow, setDeleteRow] = useState<TransactionRow | null>(null);
+  const [matchRow, setMatchRow] = useState<TransactionRow | null>(null);
+  const [splitTxId, setSplitTxId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -265,7 +298,7 @@ export default function Transactions() {
                         {showDetailedCols && (
                           <td className="px-3 py-2.5"><TypeBadge type={row.transaction_type} /></td>
                         )}
-                        <td className="px-3 py-2.5 text-sm text-gray-700">{row.matched_tenant_name ?? '—'}</td>
+                        <td className="px-3 py-2.5"><TenantCell row={row} /></td>
                         <td className="px-3 py-2.5"><MatchStatusBadge row={row} /></td>
                         {showDetailedCols && (
                           <>
@@ -297,6 +330,26 @@ export default function Transactions() {
                         )}
                         <td className="px-3 py-2.5">
                           <div className="flex gap-1.5">
+                            {/* Match action: unmatched payments only (not "ignored", not already matched) */}
+                            {!row.matched_tenant_id && !row.is_confirmed && row.transaction_type !== 'other' && (
+                              <button
+                                onClick={() => setMatchRow(row)}
+                                className="text-gray-400 hover:text-blue-600 transition-colors"
+                                title="התאם לדייר"
+                              >
+                                🔗
+                              </button>
+                            )}
+                            {/* Split editor: any row already resolved as a split, lets the user re-balance */}
+                            {row.is_confirmed && row.allocations_summary.count >= 2 && (
+                              <button
+                                onClick={() => setSplitTxId(row.id)}
+                                className="text-gray-400 hover:text-purple-600 transition-colors"
+                                title="עריכת פיצול"
+                              >
+                                ✂️
+                              </button>
+                            )}
                             <button
                               onClick={() => setEditRow(row)}
                               className="text-gray-400 hover:text-blue-600 transition-colors"
@@ -304,7 +357,7 @@ export default function Transactions() {
                             >
                               ✏️
                             </button>
-                            {row.matched_tenant_id && (
+                            {(row.matched_tenant_id || row.is_confirmed) && (
                               <button
                                 onClick={() => unmatchMutation.mutate(row.id)}
                                 disabled={unmatchMutation.isPending}
@@ -368,6 +421,28 @@ export default function Transactions() {
 
       {editRow && (
         <TransactionEditDialog row={editRow} onClose={() => setEditRow(null)} />
+      )}
+
+      {matchRow && (
+        <QuickMatchPopover
+          row={matchRow}
+          onClose={() => setMatchRow(null)}
+          onOpenSplit={() => {
+            setSplitTxId(matchRow.id);
+            setMatchRow(null);
+          }}
+        />
+      )}
+
+      {splitTxId && (
+        <AllocationDrawer
+          transactionId={splitTxId}
+          onClose={() => setSplitTxId(null)}
+          onSaved={() => {
+            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+            setSplitTxId(null);
+          }}
+        />
       )}
 
       {showAdd && (

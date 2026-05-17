@@ -131,16 +131,14 @@ def _serialize_row(t: Transaction, building_id_by_tenant: dict, building_name_by
 
     allocations = list(t.allocations or [])
     alloc_total = sum((a.amount for a in allocations), Decimal(0))
-    if allocations:
-        first = allocations[0]
-        if first.tenant_id and first.tenant is not None:
-            top_label = first.tenant.name
-        elif first.label:
-            top_label = first.label
-        else:
-            top_label = None
-    else:
-        top_label = None
+
+    def _alloc_label(a) -> Optional[str]:
+        if a.tenant_id and a.tenant is not None:
+            return a.tenant.name
+        return a.label
+
+    alloc_labels = [lbl for lbl in (_alloc_label(a) for a in allocations) if lbl]
+    top_label = alloc_labels[0] if alloc_labels else None
 
     return {
         "id": str(t.id),
@@ -165,6 +163,7 @@ def _serialize_row(t: Transaction, building_id_by_tenant: dict, building_name_by
             "count": len(allocations),
             "total": float(alloc_total),
             "top_label": top_label,
+            "labels": alloc_labels,
         },
     }
 
@@ -194,10 +193,15 @@ def list_transactions(
     """Return a paginated, filtered, sorted slice of all transactions.
 
     Match status values:
-      confirmed  — is_confirmed=True
-      auto       — matched_tenant_id IS NOT NULL AND NOT is_confirmed
-      unmatched  — matched_tenant_id IS NULL AND transaction_type != OTHER
-      ignored    — matched_tenant_id IS NULL AND transaction_type == OTHER
+      confirmed  — is_confirmed=True AND matched_tenant_id IS NOT NULL  (single tenant, confirmed)
+      split      — is_confirmed=True AND matched_tenant_id IS NULL      (multi-tenant split)
+      auto       — matched_tenant_id IS NOT NULL AND NOT is_confirmed   (engine guess pending review)
+      unmatched  — matched_tenant_id IS NULL AND NOT is_confirmed AND transaction_type != OTHER
+      ignored    — matched_tenant_id IS NULL AND NOT is_confirmed AND transaction_type == OTHER
+
+    Note: a split transaction stores its tenants in the `allocations` table and leaves
+    `matched_tenant_id` NULL by design (the FK can only hold one tenant). `is_confirmed`
+    is the single source of truth for "user resolved this row".
     """
     query = db.query(Transaction).outerjoin(
         BankStatement, Transaction.statement_id == BankStatement.id
@@ -227,20 +231,33 @@ def list_transactions(
         clauses = []
         for s in match_status:
             if s == "confirmed":
-                clauses.append(Transaction.is_confirmed.is_(True))
+                # Single-tenant confirmed (FK populated, user-approved)
+                clauses.append(and_(
+                    Transaction.is_confirmed.is_(True),
+                    Transaction.matched_tenant_id.isnot(None),
+                ))
+            elif s == "split":
+                # Multi-tenant split: confirmed but FK is null because allocations table holds the truth
+                clauses.append(and_(
+                    Transaction.is_confirmed.is_(True),
+                    Transaction.matched_tenant_id.is_(None),
+                ))
             elif s == "auto":
                 clauses.append(and_(
                     Transaction.matched_tenant_id.isnot(None),
                     Transaction.is_confirmed.is_(False),
                 ))
             elif s == "unmatched":
+                # Truly pending action — not confirmed, no FK, and not user-flagged as ignored
                 clauses.append(and_(
                     Transaction.matched_tenant_id.is_(None),
+                    Transaction.is_confirmed.is_(False),
                     Transaction.transaction_type != TransactionType.OTHER,
                 ))
             elif s == "ignored":
                 clauses.append(and_(
                     Transaction.matched_tenant_id.is_(None),
+                    Transaction.is_confirmed.is_(False),
                     Transaction.transaction_type == TransactionType.OTHER,
                 ))
         if clauses:
