@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request, Query
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import List, Optional
@@ -6,6 +7,7 @@ from uuid import UUID
 import pandas as pd
 import io
 import logging
+import urllib.parse
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -14,7 +16,11 @@ from ..database import get_db
 from ..models import Tenant, Apartment, Building, OwnershipType
 from ..models.user import User
 from ..schemas import TenantCreate, TenantUpdate, TenantResponse
-from ..dependencies.auth import require_manager, require_worker_plus, require_viewer_plus
+from ..dependencies.auth import require_manager, require_worker_plus, require_viewer_plus, require_any_auth
+from ..services.tenant_report_data import build_tenant_report_payload
+from ..services.report_pdf import render_tenant_report_pdf
+from ..services.report_docx import render_tenant_report_docx
+from .buildings import _parse_report_period
 
 logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
@@ -440,3 +446,64 @@ def patch_apartment(
         "apartment_id": str(apartment.id),
         "expected_payment": float(apartment.expected_payment) if apartment.expected_payment is not None else None,
     }
+
+
+# ─── Tenant report endpoints ──────────────────────────────────────────────────
+
+@router.get("/{tenant_id}/report")
+def get_tenant_report(
+    tenant_id: UUID,
+    from_: str = Query(..., alias="from"),
+    to: str = Query(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_any_auth),
+):
+    f, t = _parse_report_period(from_, to)
+    try:
+        return build_tenant_report_payload(db, tenant_id, f, t)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.get("/{tenant_id}/report.pdf")
+def get_tenant_report_pdf(
+    tenant_id: UUID,
+    from_: str = Query(..., alias="from"),
+    to: str = Query(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_any_auth),
+):
+    f, t = _parse_report_period(from_, to)
+    try:
+        payload = build_tenant_report_payload(db, tenant_id, f, t)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    pdf = render_tenant_report_pdf(payload)
+    fname = urllib.parse.quote(f"דוח_{payload['tenant']['name']}_{payload['period']['label']}.pdf")
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"},
+    )
+
+
+@router.get("/{tenant_id}/report.docx")
+def get_tenant_report_docx(
+    tenant_id: UUID,
+    from_: str = Query(..., alias="from"),
+    to: str = Query(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_any_auth),
+):
+    f, t = _parse_report_period(from_, to)
+    try:
+        payload = build_tenant_report_payload(db, tenant_id, f, t)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    doc = render_tenant_report_docx(payload)
+    fname = urllib.parse.quote(f"דוח_{payload['tenant']['name']}_{payload['period']['label']}.docx")
+    return Response(
+        content=doc,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"},
+    )
