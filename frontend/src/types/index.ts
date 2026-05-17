@@ -520,3 +520,51 @@ export interface BuildingReportPayload {
     note: string;
   }>;
 }
+
+// --- Tenant report export types ---
+
+export interface TenantReportMonth {
+  month: number;
+  year: number;
+  period_label: string;
+  expected: number;
+  paid: number;
+  difference: number;
+  status: 'paid' | 'partial' | 'unpaid';
+}
+
+export interface TenantReportTransaction {
+  date: string;          // ISO; may include 'T<time>' suffix
+  amount: number;
+  description: string;
+  is_manual: boolean;
+  period_month: number;
+  period_year: number;
+}
+
+export interface TenantStandingOrder {
+  start_date: string;            // ISO date
+  end_date: string | null;       // ISO date, null = ongoing
+  amount: number;
+}
+
+export interface TenantReportPayload {
+  tenant: {
+    id: string;
+    name: string;
+    apartment_number: number;
+    floor: number;
+    standing_order: TenantStandingOrder | null;
+    building: { name: string; address: string; city: string };
+  };
+  period: { from: string; to: string; label: string };
+  summary: {
+    period_expected: number;
+    period_paid: number;
+    period_debt: number;
+    lifetime_debt: number;
+    transaction_count: number;
+  };
+  months: TenantReportMonth[];
+  transactions: TenantReportTransaction[];
+}
