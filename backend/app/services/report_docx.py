@@ -191,3 +191,61 @@ def render_report_docx(payload: dict) -> bytes:
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
+
+
+def render_tenant_report_docx(payload: dict) -> bytes:
+    doc = Document()
+    style = doc.styles["Normal"]
+    style.font.name = _FONT
+    style.font.size = Pt(_BODY_PT)
+
+    _add_para(doc, payload["tenant"]["name"], bold=True, size=_HEAD_PT)
+    t = payload["tenant"]
+    meta = f"דירה {t['apartment_number']}"
+    if t.get("floor"):
+        meta += f" · קומה {t['floor']}"
+    meta += f" · {t['building']['name']}, {t['building']['address']}, {t['building']['city']}"
+    _add_para(doc, meta)
+    _add_para(doc, payload["period"]["label"], bold=True)
+    if t.get("standing_order"):
+        so = t["standing_order"]
+        line = "הוראת קבע פעילה"
+        if so.get("amount"):
+            line += f" — {_shekel(so['amount'])} לחודש"
+        if so.get("end_date"):
+            line += f" (עד {so['end_date']})"
+        _add_para(doc, line)
+
+    doc.add_paragraph()
+    _add_para(doc, "סיכום", bold=True, size=_SUB_PT)
+    s = payload["summary"]
+    _add_table(
+        doc,
+        ["סה״כ שולם בתקופה", "חוב כולל", "חוב לתקופה"],
+        [[_shekel(s["period_paid"]), _shekel(s["lifetime_debt"]), _shekel(s["period_debt"])]],
+    )
+
+    doc.add_paragraph()
+    _add_para(doc, "פירוט חודשי", bold=True, size=_SUB_PT)
+    rows = []
+    for r in payload["months"]:
+        status_he = {"paid": "שולם", "partial": "חלקי", "unpaid": "לא שולם"}.get(r["status"], "")
+        diff = r["difference"]
+        diff_s = ("-" + _shekel(-diff)) if diff < 0 else _shekel(diff)
+        rows.append([r["period_label"], _shekel(r["expected"]), _shekel(r["paid"]), diff_s, status_he])
+    _add_table(doc, ["חודש", "צפוי", "שולם", "הפרש", "סטטוס"], rows)
+
+    doc.add_paragraph()
+    _add_para(doc, "תנועות בתקופה", bold=True, size=_SUB_PT)
+    if not payload["transactions"]:
+        _add_para(doc, "אין תנועות בתקופה זו")
+    else:
+        tx_rows = []
+        for tx in payload["transactions"]:
+            date_str = tx["date"].split("T")[0] if "T" in tx["date"] else tx["date"]
+            tx_rows.append([date_str, tx["description"], _shekel(tx["amount"]), "✓" if tx["is_manual"] else ""])
+        _add_table(doc, ["תאריך", "תיאור", "סכום", "ידני?"], tx_rows)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
