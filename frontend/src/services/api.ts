@@ -1,4 +1,4 @@
-import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview, Allocation, SetAllocationsRequest, PortfolioTrendMonth, BuildingSummaryStats, ExpenseCategory, Expense, UploadResult, BuildingReportPayload, ReportFormat, RecentUploadsResponse, TransactionPatchPayload, SplitAllocationError, ReviewTransaction, MatchSuggestion, TransactionsListParams, TransactionsListResponse, TransactionCreatePayload, TransactionRow } from '../types';
+import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview, Allocation, SetAllocationsRequest, PortfolioTrendMonth, BuildingSummaryStats, ExpenseCategory, Expense, UploadResult, BuildingReportPayload, ReportFormat, RecentUploadsResponse, TransactionPatchPayload, SplitAllocationError, ReviewTransaction, MatchSuggestion, TransactionsListParams, TransactionsListResponse, TransactionCreatePayload, TransactionRow, TenantReportPayload } from '../types';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -464,6 +464,50 @@ export const reportsAPI = {
     const cd = res.headers.get('content-disposition') ?? '';
     const m = cd.match(/filename\*=UTF-8''([^;]+)/i);
     const filename = m ? decodeURIComponent(m[1]) : `report.${format}`;
+    return { blob, filename };
+  },
+
+  getTenantPayload: (tenantId: string, from: string, to: string) =>
+    fetchAPI<TenantReportPayload>(`/api/v1/tenants/${tenantId}/report?from=${from}&to=${to}`),
+
+  async downloadTenant(
+    tenantId: string,
+    from: string,
+    to: string,
+    format: ReportFormat,
+  ): Promise<{ blob: Blob; filename: string }> {
+    const token = localStorage.getItem(TOKEN_KEYS.ACCESS);
+    const url = `${API_BASE_URL}/api/v1/tenants/${tenantId}/report.${format}?from=${from}&to=${to}`;
+    const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) throw new Error(`Tenant report download failed: ${res.status}`);
+    const blob = await res.blob();
+    const cd = res.headers.get('content-disposition') ?? '';
+    const m = cd.match(/filename\*=UTF-8''([^;]+)/i);
+    const filename = m ? decodeURIComponent(m[1]) : `tenant-report.${format}`;
+    return { blob, filename };
+  },
+
+  async downloadTenantBulk(
+    tenantIds: string[],
+    from: string,
+    to: string,
+    format: ReportFormat,
+  ): Promise<{ blob: Blob; filename: string }> {
+    const token = localStorage.getItem(TOKEN_KEYS.ACCESS);
+    const url = `${API_BASE_URL}/api/v1/tenants/bulk-report?from=${from}&to=${to}&format=${format}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ tenant_ids: tenantIds }),
+    });
+    if (!res.ok) throw new Error(`Bulk report download failed: ${res.status}`);
+    const blob = await res.blob();
+    const cd = res.headers.get('content-disposition') ?? '';
+    const m = cd.match(/filename\*=UTF-8''([^;]+)/i);
+    const filename = m ? decodeURIComponent(m[1]) : `reports.zip`;
     return { blob, filename };
   },
 };
