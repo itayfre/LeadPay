@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import PeriodRangePicker from '../building/PeriodRangePicker';
+import TenantReportPanel from './TenantReportPanel';
 import { reportsAPI } from '../../services/api';
 import { toYYYYMM } from '../../hooks/useBuildingPeriodRange';
 import type { DateRange, MonthYear } from '../../hooks/useBuildingPeriodRange';
@@ -27,6 +28,7 @@ const shekel = (n: number | null | undefined) =>
   n == null ? '—' : `₪${Math.round(n).toLocaleString('he-IL')}`;
 
 export default function ExportReportDialog({ buildingId, isOpen, onClose }: Props) {
+  const [mode, setMode] = useState<'building' | 'tenant'>('building');
   const [range, setRange] = useState<DateRange>(defaultRange);
   const [downloading, setDownloading] = useState<ReportFormat | null>(null);
 
@@ -36,7 +38,7 @@ export default function ExportReportDialog({ buildingId, isOpen, onClose }: Prop
   const { data: payload, isLoading, isError } = useQuery({
     queryKey: ['report-preview', buildingId, fromStr, toStr],
     queryFn: () => reportsAPI.getPayload(buildingId, fromStr, toStr),
-    enabled: isOpen,
+    enabled: isOpen && mode === 'building',
   });
 
   const handleDownload = useCallback(async (format: ReportFormat) => {
@@ -64,7 +66,19 @@ export default function ExportReportDialog({ buildingId, isOpen, onClose }: Prop
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-xl font-bold text-gray-900">📄 ייצוא דוח</h2>
+          <div className="flex items-center gap-4">
+            <h2 className="text-xl font-bold text-gray-900">📄 ייצוא דוח</h2>
+            <div className="flex rounded-lg bg-gray-100 p-1 text-xs">
+              <button
+                onClick={() => setMode('building')}
+                className={`px-3 py-1.5 rounded-md font-medium ${mode === 'building' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}
+              >🏢 בניין</button>
+              <button
+                onClick={() => setMode('tenant')}
+                className={`px-3 py-1.5 rounded-md font-medium ${mode === 'tenant' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}
+              >👤 דיירים</button>
+            </div>
+          </div>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
@@ -74,6 +88,10 @@ export default function ExportReportDialog({ buildingId, isOpen, onClose }: Prop
           </button>
         </div>
 
+        {mode === 'tenant' ? (
+          <TenantReportPanel buildingId={buildingId} />
+        ) : (
+          <>
         {/* Period picker */}
         <div className="px-6 py-4 border-b border-gray-100">
           <PeriodRangePicker range={range} onChange={setRange} />
@@ -290,6 +308,8 @@ export default function ExportReportDialog({ buildingId, isOpen, onClose }: Prop
             </button>
           </div>
         </div>
+          </>
+        )}
 
       </div>
     </div>
