@@ -2,13 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from typing import List, Optional
+from typing import List, Literal, Optional
 from uuid import UUID
 import pandas as pd
 import io
 import logging
 import urllib.parse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -33,6 +33,10 @@ class ResolveApartmentRequest(BaseModel):
 
 class PatchApartmentRequest(BaseModel):
     expected_payment: Optional[float] = None
+
+
+class BulkReportRequest(BaseModel):
+    tenant_ids: list[UUID] = Field(..., min_length=1, max_length=50)
 
 router = APIRouter(
     prefix="/api/v1/tenants",
@@ -505,5 +509,38 @@ def get_tenant_report_docx(
     return Response(
         content=doc,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"},
+    )
+
+
+@router.post("/bulk-report")
+def post_bulk_tenant_report(
+    body: BulkReportRequest,
+    from_: str = Query(..., alias="from"),
+    to: str = Query(...),
+    fmt: Literal["pdf", "docx"] = Query("pdf", alias="format"),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_any_auth),
+):
+    from ..services.tenant_report_data import build_bulk_report_zip
+
+    f, t = _parse_report_period(from_, to)
+
+    # All tenant_ids must belong to a single building (anti-leak guard).
+    tenants = db.query(Tenant).filter(Tenant.id.in_(body.tenant_ids)).all()
+    if len(tenants) != len(set(body.tenant_ids)):
+        raise HTTPException(status_code=400, detail="Some tenant_ids are invalid")
+    building_ids = {t.building_id for t in tenants}
+    if len(building_ids) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="All tenant_ids must belong to the same building",
+        )
+
+    zip_bytes, zip_filename = build_bulk_report_zip(db, body.tenant_ids, f, t, fmt)
+    fname = urllib.parse.quote(zip_filename)
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"},
     )
