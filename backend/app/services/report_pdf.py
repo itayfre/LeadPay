@@ -32,3 +32,16 @@ def render_report_pdf(payload: dict) -> bytes:
     template = _env.get_template("report.html.j2")
     html_str = template.render(payload=payload, font_dir=str(_FONTS))
     return HTML(string=html_str, base_url=str(_BASE)).write_pdf()
+
+
+def render_tenant_report_pdf(payload: dict) -> bytes:
+    try:
+        from weasyprint import HTML
+    except OSError as exc:
+        raise RuntimeError(
+            "WeasyPrint system libraries (GLib/Pango/Cairo) are not available "
+            "in this environment. PDF export is unavailable."
+        ) from exc
+    template = _env.get_template("tenant_report.html.j2")
+    html_str = template.render(payload=payload, font_dir=str(_FONTS))
+    return HTML(string=html_str, base_url=str(_BASE)).write_pdf()
