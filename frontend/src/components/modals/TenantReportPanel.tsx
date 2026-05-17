@@ -70,7 +70,7 @@ export default function TenantReportPanel({ buildingId }: Props) {
     });
   };
 
-  const selectAll = () => setSelected(new Set(filtered.map(t => t.id)));
+  const selectAll = () => setSelected(new Set(filtered.filter(t => t.is_active).map(t => t.id)));
   const clearAll = () => setSelected(new Set());
 
   const handleDownload = useCallback(async (format: ReportFormat) => {

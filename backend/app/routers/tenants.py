@@ -528,8 +528,8 @@ def post_bulk_tenant_report(
 
     # All tenant_ids must belong to a single building (anti-leak guard).
     tenants = db.query(Tenant).filter(Tenant.id.in_(body.tenant_ids)).all()
-    if len(tenants) != len(set(body.tenant_ids)):
-        raise HTTPException(status_code=400, detail="Some tenant_ids are invalid")
+    if len(tenants) != len(body.tenant_ids):
+        raise HTTPException(status_code=400, detail="Duplicate or invalid tenant_ids")
     building_ids = {t.building_id for t in tenants}
     if len(building_ids) != 1:
         raise HTTPException(
