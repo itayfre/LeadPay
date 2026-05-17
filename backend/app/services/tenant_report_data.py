@@ -3,7 +3,9 @@ Per-tenant report payload builder.
 Mirrors report_data.py but scoped to a single tenant.
 """
 import datetime as dt
-from typing import Optional
+import io
+import zipfile
+from typing import Literal, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session, joinedload
@@ -218,3 +220,66 @@ def build_tenant_report_payload(
         "months": months_payload,
         "transactions": transactions_payload,
     }
+
+
+def build_bulk_report_zip(
+    db: Session,
+    tenant_ids: list[UUID],
+    from_date: dt.date,
+    to_date: dt.date,
+    fmt: Literal["pdf", "docx"],
+) -> tuple[bytes, str]:
+    """
+    Render reports for every tenant id and pack into a ZIP.
+    Returns (zip_bytes, zip_filename).
+
+    On per-tenant render failure: include a .txt with the error and continue —
+    one bad tenant must never abort the whole batch.
+    """
+    # Lazy imports — same lazy strategy as render_tenant_report_pdf.
+    from .report_pdf import render_tenant_report_pdf
+    from .report_docx import render_tenant_report_docx
+    renderer = render_tenant_report_pdf if fmt == "pdf" else render_tenant_report_docx
+    ext = "pdf" if fmt == "pdf" else "docx"
+
+    # Detect filename collisions up front so we can disambiguate with the
+    # apartment number when two selected tenants share a name.
+    name_counts: dict[str, int] = {}
+    for tid in tenant_ids:
+        t = db.query(Tenant).filter(Tenant.id == tid).first()
+        if t:
+            n = t.full_name or t.name
+            name_counts[n] = name_counts.get(n, 0) + 1
+    collisions = {n for n, c in name_counts.items() if c > 1}
+
+    buf = io.BytesIO()
+    building_name = "דוחות"
+    period_label = ""
+
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for tid in tenant_ids:
+            try:
+                payload = build_tenant_report_payload(db, tid, from_date, to_date)
+            except ValueError as e:
+                zf.writestr(f"שגיאה_{tid}.txt", str(e))
+                continue
+            try:
+                content = renderer(payload)
+            except Exception as e:  # noqa: BLE001 — log + continue, never abort the batch
+                zf.writestr(
+                    f"שגיאה_{payload['tenant']['name']}.txt",
+                    f"רינדור הדוח נכשל: {e}",
+                )
+                continue
+
+            name = payload["tenant"]["name"]
+            if name in collisions:
+                inner = f"דוח_{name}_דירה{payload['tenant']['apartment_number']}.{ext}"
+            else:
+                inner = f"דוח_{name}.{ext}"
+            zf.writestr(inner, content)
+            building_name = payload["tenant"]["building"]["name"]
+            period_label = payload["period"]["label"]
+
+    zip_filename = f"דוחות_{building_name}_{period_label}.zip" if period_label else "דוחות.zip"
+    return buf.getvalue(), zip_filename
