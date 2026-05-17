@@ -1,5 +1,4 @@
 import datetime as dt
-import pytest
 
 from app.services.tenant_report_data import (
     _period_label,
