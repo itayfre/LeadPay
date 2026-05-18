@@ -134,6 +134,10 @@ def list_tenants(
             "standing_order_amount": float(tenant.standing_order_amount) if tenant.standing_order_amount is not None else None,
             "notes": tenant.notes,
             "is_active": tenant.is_active,
+            "move_in_date": tenant.move_in_date.isoformat() if tenant.move_in_date else None,
+            "building_default_move_in_date": building.default_move_in_date.isoformat() if building.default_move_in_date else None,
+            "effective_move_in_date": (tenant.move_in_date or building.default_move_in_date).isoformat()
+                if (tenant.move_in_date or building.default_move_in_date) else None,
             "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
             "updated_at": tenant.updated_at.isoformat() if tenant.updated_at else None,
         }

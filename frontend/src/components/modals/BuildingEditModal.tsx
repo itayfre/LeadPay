@@ -20,6 +20,7 @@ export default function BuildingEditModal({
     city: '',
     bank_account_number: '',
     expected_monthly_payment: '',
+    default_move_in_date: '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,9 +33,10 @@ export default function BuildingEditModal({
         city: building.city || '',
         bank_account_number: building.bank_account_number || '',
         expected_monthly_payment: building.expected_monthly_payment?.toString() || '',
+        default_move_in_date: building.default_move_in_date || '',
       });
     } else {
-      setFormData({ name: '', address: '', city: '', bank_account_number: '', expected_monthly_payment: '' });
+      setFormData({ name: '', address: '', city: '', bank_account_number: '', expected_monthly_payment: '', default_move_in_date: '' });
     }
     setError(null);
   }, [building, isOpen]);
@@ -56,6 +58,9 @@ export default function BuildingEditModal({
       };
       if (formData.expected_monthly_payment) {
         data.expected_monthly_payment = parseFloat(formData.expected_monthly_payment);
+      }
+      if (formData.default_move_in_date) {
+        data.default_move_in_date = formData.default_move_in_date;
       }
       await onSave(data);
       onCancel();
@@ -125,6 +130,16 @@ export default function BuildingEditModal({
                 onChange={(e) => setFormData({ ...formData, expected_monthly_payment: e.target.value })}
                 className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
                 placeholder="500.00" />
+            </div>
+            <div className="md:col-span-2">
+              <label htmlFor="building-move-in" className="block text-sm font-semibold text-gray-700 mb-2">
+                תאריך כניסה ברירת מחדל
+                <span className="font-normal text-gray-400 mr-2 text-xs">(חל על דיירים ללא תאריך כניסה אישי)</span>
+              </label>
+              <input id="building-move-in" type="date" value={formData.default_move_in_date}
+                onChange={(e) => setFormData({ ...formData, default_move_in_date: e.target.value })}
+                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
+                dir="ltr" />
             </div>
           </div>
 

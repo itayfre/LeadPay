@@ -8,6 +8,7 @@ export interface Building {
   bank_account_number?: string;
   total_tenants: number;
   expected_monthly_payment?: number;
+  default_move_in_date?: string;    // ISO 'YYYY-MM-DD' — fallback for tenants with NULL move_in_date
   total_expected_monthly?: number;  // computed sum of active tenant expected payments
   created_at: string;
   updated_at: string;
@@ -127,7 +128,9 @@ export interface Tenant {
   floor?: number;
   expected_payment?: number | null;           // per-apartment override (null = not set)
   building_expected_payment?: number | null;  // building default (for display fallback)
-  move_in_date?: string;   // ISO date, default "2026-01-01"
+  move_in_date?: string | null;             // ISO date — null = use building default
+  building_default_move_in_date?: string;   // building-level fallback
+  effective_move_in_date?: string;          // server-resolved: move_in_date ?? building default
 }
 
 export interface PaymentStatus {
@@ -537,7 +540,7 @@ export interface TenantReportTransaction {
   date: string;          // ISO; may include 'T<time>' suffix
   amount: number;
   description: string;
-  is_manual: boolean;
+  method: string;        // Hebrew label: user note, "תשלום ידני", "פיצול מצ׳ק", or "העברה בנקאית"
   period_month: number;
   period_year: number;
 }

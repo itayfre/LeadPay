@@ -75,7 +75,7 @@ def build_report_payload(
     income_rows = _income_rows(db, building, apartments, tenants_by_apt, period)
     expenses_groups = _expenses_groups(db, building_id, from_date, to_date)
     debtors_period = _period_debtors(income_rows)
-    debtors_lifetime = _lifetime_debtors(db, building_id, apartments, tenants_by_apt)
+    debtors_lifetime = _lifetime_debtors(db, building, apartments, tenants_by_apt)
 
     total_income = sum(r["paid_total"] for r in income_rows)
     total_expenses = sum(g["subtotal"] for g in expenses_groups)
@@ -384,7 +384,7 @@ def _period_debtors(income_rows: list[dict]) -> list[dict]:
 
 def _lifetime_debtors(
     db: Session,
-    building_id: UUID,
+    building: Building,
     apartments: list[Apartment],
     tenants_by_apt: dict[UUID, Tenant],
 ) -> list[dict]:
@@ -426,8 +426,8 @@ def _lifetime_debtors(
             # Re-query building default — building reference may not be loaded
             pass  # already scoped via apartments
 
-        # Months since move_in_date
-        move_in = tenant.move_in_date or dt.date(today.year, 1, 1)
+        # Months since effective move_in_date (tenant override → building default)
+        move_in = tenant.move_in_date or building.default_move_in_date or dt.date(today.year, 1, 1)
         months_active = (
             (today.year - move_in.year) * 12 + (today.month - move_in.month) + 1
         )

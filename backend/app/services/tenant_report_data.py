@@ -8,6 +8,7 @@ import zipfile
 from typing import Literal, Optional
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from ..models import Apartment, Tenant, Building
@@ -77,20 +78,37 @@ def _lifetime_debt(
     building: Building,
     total_paid: float,
 ) -> float:
-    """Total expected since move_in_date minus the total paid amount provided by the caller."""
-    if tenant.move_in_date is None:
+    """Total expected since effective move_in_date minus the total paid amount provided by the caller."""
+    move_in = tenant.move_in_date or building.default_move_in_date
+    if move_in is None:
         return 0.0
     today = dt.date.today()
-    if tenant.move_in_date > today:
+    if move_in > today:
         return 0.0
 
     months_elapsed = (
-        (today.year - tenant.move_in_date.year) * 12
-        + (today.month - tenant.move_in_date.month)
+        (today.year - move_in.year) * 12
+        + (today.month - move_in.month)
         + 1
     )
     expected_per_month = _expected_for_apartment(apt, float(building.expected_monthly_payment or 0))
     return max(months_elapsed * expected_per_month - total_paid, 0.0)
+
+
+def _transaction_method(
+    a: TransactionAllocation, t: Transaction, alloc_count: int
+) -> str:
+    """Hebrew label for the תנועות table. The user's allocation note takes
+    priority — if they wrote something when entering/categorizing the payment,
+    that's the most informative thing we can show. Otherwise we infer the
+    method from the schema."""
+    if a.notes:
+        return a.notes
+    if t.is_manual:
+        return "תשלום ידני"
+    if alloc_count > 1:
+        return "פיצול מצ׳ק"
+    return "העברה בנקאית"
 
 
 def build_tenant_report_payload(
@@ -112,7 +130,7 @@ def build_tenant_report_payload(
         raise ValueError(f"Building for tenant {tenant_id} not found")
 
     expected_per_month = _expected_for_apartment(apt, float(building.expected_monthly_payment or 0))
-    months_yyyymm = _period_months(from_date, to_date, tenant.move_in_date)
+    months_yyyymm = _period_months(from_date, to_date, tenant.move_in_date or building.default_move_in_date)
 
     # Single join: every PAYMENT allocation for this tenant, paired with its
     # parent Transaction. Used for both lifetime totals and the per-period rows.
@@ -169,12 +187,29 @@ def build_tenant_report_payload(
         key=lambda pair: pair[1].activity_date or dt.datetime.min,
         reverse=True,
     )
+
+    # Count allocations per parent transaction so we can tell split-from-check
+    # rows apart from single-allocation transactions. The count must include
+    # allocations to *other* tenants too — that's what makes it a split.
+    tx_ids = [a.transaction_id for a, _ in in_range_sorted]
+    alloc_counts: dict = {}
+    if tx_ids:
+        alloc_counts = dict(
+            db.query(
+                TransactionAllocation.transaction_id,
+                func.count(TransactionAllocation.id),
+            )
+            .filter(TransactionAllocation.transaction_id.in_(tx_ids))
+            .group_by(TransactionAllocation.transaction_id)
+            .all()
+        )
+
     transactions_payload = [
         {
             "date": (t.activity_date.isoformat() if t.activity_date else ""),
             "amount": float(a.amount),
             "description": t.description or "",
-            "is_manual": bool(t.is_manual),
+            "method": _transaction_method(a, t, alloc_counts.get(a.transaction_id, 1)),
             "period_month": a.period_month,
             "period_year": a.period_year,
         }

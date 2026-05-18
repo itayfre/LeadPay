@@ -39,9 +39,8 @@ class Tenant(Base):
     is_active = Column(Boolean, default=True)
     move_in_date = Column(
         Date,
-        nullable=False,
-        server_default='2026-01-01',
-        comment="Debt calculation start date"
+        nullable=True,
+        comment="Per-tenant override for debt-calc start date; NULL = use building.default_move_in_date",
     )
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

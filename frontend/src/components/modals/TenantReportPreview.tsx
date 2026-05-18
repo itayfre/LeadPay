@@ -86,7 +86,7 @@ export default function TenantReportPreview({ payload }: { payload: TenantReport
                 <th className="border border-gray-200 px-3 py-2 text-right">תאריך</th>
                 <th className="border border-gray-200 px-3 py-2 text-right">תיאור</th>
                 <th className="border border-gray-200 px-3 py-2 text-right">סכום</th>
-                <th className="border border-gray-200 px-3 py-2 text-right">ידני?</th>
+                <th className="border border-gray-200 px-3 py-2 text-right">אופן תשלום</th>
               </tr>
             </thead>
             <tbody>
@@ -95,7 +95,7 @@ export default function TenantReportPreview({ payload }: { payload: TenantReport
                   <td className="border border-gray-200 px-3 py-1.5">{formatDate(tx.date)}</td>
                   <td className="border border-gray-200 px-3 py-1.5">{tx.description}</td>
                   <td className="border border-gray-200 px-3 py-1.5">{shekel(tx.amount)}</td>
-                  <td className="border border-gray-200 px-3 py-1.5">{tx.is_manual ? '✓' : ''}</td>
+                  <td className="border border-gray-200 px-3 py-1.5">{tx.method}</td>
                 </tr>
               ))}
             </tbody>

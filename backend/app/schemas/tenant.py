@@ -19,6 +19,7 @@ class TenantBase(BaseModel):
     standing_order_amount: Optional[float] = None
     notes: Optional[str] = None
     is_active: bool = True
+    move_in_date: Optional[date] = None
 
     @model_validator(mode="after")
     def _validate_standing_order(self):
@@ -73,7 +74,6 @@ class TenantResponse(TenantBase):
     building_id: UUID
     created_at: datetime
     updated_at: datetime
-    move_in_date: date
 
     model_config = ConfigDict(from_attributes=True)
 

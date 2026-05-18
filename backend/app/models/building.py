@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, DateTime, Numeric
+from sqlalchemy import Column, String, Integer, DateTime, Numeric, Date
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -17,6 +17,12 @@ class Building(Base):
     bank_account_number = Column(String, nullable=True)
     total_tenants = Column(Integer, default=0)
     expected_monthly_payment = Column(Numeric(10, 2), nullable=True, comment="Default expected payment per apartment")
+    default_move_in_date = Column(
+        Date,
+        nullable=False,
+        server_default='2026-01-01',
+        comment="Default move-in date for new tenants; used as fallback when tenant.move_in_date is NULL",
+    )
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

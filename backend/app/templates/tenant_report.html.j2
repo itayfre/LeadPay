@@ -74,14 +74,14 @@
     <div class="empty">אין תנועות בתקופה זו</div>
   {% else %}
     <table>
-      <thead><tr><th>תאריך</th><th>תיאור</th><th>סכום</th><th>ידני?</th></tr></thead>
+      <thead><tr><th>תאריך</th><th>תיאור</th><th>סכום</th><th>אופן תשלום</th></tr></thead>
       <tbody>
         {% for t in payload.transactions %}
           <tr>
             <td>{{ t.date.split('T')[0] if 'T' in t.date else t.date }}</td>
             <td>{{ t.description }}</td>
             <td>₪{{ "{:,.0f}".format(t.amount) }}</td>
-            <td>{% if t.is_manual %}✓{% endif %}</td>
+            <td>{{ t.method }}</td>
           </tr>
         {% endfor %}
       </tbody>

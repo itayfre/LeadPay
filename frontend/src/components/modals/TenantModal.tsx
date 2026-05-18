@@ -35,7 +35,7 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
     standing_order_end_date: '',
     standing_order_amount: '',
     is_active: true,
-    move_in_date: '2026-01-01',
+    move_in_date: '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +55,7 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
         standing_order_end_date: tenant.standing_order_end_date || '',
         standing_order_amount: tenant.standing_order_amount != null ? String(tenant.standing_order_amount) : '',
         is_active: tenant.is_active !== false,
-        move_in_date: tenant.move_in_date || '2026-01-01',
+        move_in_date: tenant.move_in_date || '',
       });
     }
   }, [tenant, buildingId]);
@@ -103,7 +103,8 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
           standing_order_end_date: soEnd,
           standing_order_amount: soStart ? soAmountNum : null,
           is_active: form.is_active,
-          move_in_date: form.move_in_date || undefined,
+          // Empty string → null = clear override, use building default
+          move_in_date: form.move_in_date || null,
         });
       } else {
         const { apartment_id } = await tenantsAPI.resolveApartment(
@@ -123,6 +124,7 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
           standing_order_end_date: soEnd,
           standing_order_amount: soStart ? soAmountNum : null,
           is_active: form.is_active,
+          // Omit when blank so backend NULL = building default applies
           move_in_date: form.move_in_date || undefined,
         });
       }
@@ -223,7 +225,10 @@ export default function TenantModal({ buildingId, tenant, onClose, onSaved }: Te
             </div>
 
             <div>
-              <label className={labelClass}>תאריך כניסה</label>
+              <label className={labelClass}>
+                תאריך כניסה
+                <span className="text-gray-400 font-normal text-xs mr-1">(ריק = ברירת מחדל של הבניין)</span>
+              </label>
               <input type="date" value={form.move_in_date}
                 onChange={e => setForm(f => ({ ...f, move_in_date: e.target.value }))}
                 className={inputClass} dir="ltr" />

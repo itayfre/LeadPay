@@ -303,12 +303,13 @@ def _calculate_tenant_debt_from_map(
     tenant, apartment, building, paid_map: dict, up_to_month: int, up_to_year: int
 ) -> float:
     """
-    Cumulative debt from move_in_date to up_to_month/year inclusive.
+    Cumulative debt from effective move_in_date to up_to_month/year inclusive.
+    Effective date = tenant.move_in_date if set, else building.default_move_in_date.
     paid_map: {(year, month): total_paid_float} — pre-fetched, no DB calls here.
     """
-    if not tenant.move_in_date:
+    move_in = tenant.move_in_date or building.default_move_in_date
+    if not move_in:
         return 0.0
-    move_in = tenant.move_in_date
     expected_monthly = float(apartment.expected_payment or building.expected_monthly_payment or 0)
     if expected_monthly == 0:
         return 0.0
@@ -434,7 +435,7 @@ def get_tenant_payment_history(
         raise HTTPException(status_code=404, detail="Building not found for apartment")
 
     expected_monthly = float(apartment.expected_payment or building.expected_monthly_payment or 0)
-    move_in = tenant.move_in_date or date(2026, 1, 1)
+    move_in = tenant.move_in_date or building.default_move_in_date or date(2026, 1, 1)
     today = date.today()
 
     months_list = []
@@ -790,7 +791,8 @@ def get_payment_status(
             "phone": tenant.phone,
             "language": tenant.language.value if tenant.language else "he",
             "apartment_id": str(apartment.id),
-            "move_in_date": tenant.move_in_date.isoformat(),
+            "move_in_date": (tenant.move_in_date or building.default_move_in_date).isoformat()
+                if (tenant.move_in_date or building.default_move_in_date) else None,
             "has_standing_order": has_standing_order,
             "standing_order_amount": so_amount,
             "total_debt": _calculate_tenant_debt_from_map(
@@ -998,7 +1000,7 @@ def get_summary_stats(
             "name": r.name,
             "apt_number": int(r.apt_number) if r.apt_number is not None else 0,
             "expected": apt_exp if apt_exp is not None else bld_def,
-            "move_in_date": r.move_in_date,
+            "move_in_date": r.move_in_date or building.default_move_in_date,
             "so_start": r.so_start,
             "so_end": r.so_end,
             "so_amount": float(r.so_amount) if r.so_amount is not None else None,

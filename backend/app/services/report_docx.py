@@ -243,8 +243,8 @@ def render_tenant_report_docx(payload: dict) -> bytes:
         tx_rows = []
         for tx in payload["transactions"]:
             date_str = tx["date"].split("T")[0] if "T" in tx["date"] else tx["date"]
-            tx_rows.append([date_str, tx["description"], _shekel(tx["amount"]), "✓" if tx["is_manual"] else ""])
-        _add_table(doc, ["תאריך", "תיאור", "סכום", "ידני?"], tx_rows)
+            tx_rows.append([date_str, tx["description"], _shekel(tx["amount"]), tx["method"]])
+        _add_table(doc, ["תאריך", "תיאור", "סכום", "אופן תשלום"], tx_rows)
 
     buf = io.BytesIO()
     doc.save(buf)

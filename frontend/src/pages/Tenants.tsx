@@ -74,6 +74,10 @@ export default function Tenants() {
   };
 
   const sortedTenants = useMemo(() => [...(tenants || [])].sort((a, b) => {
+    // Primary: active tenants always come before inactive, regardless of column/direction.
+    const activeDelta = (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0);
+    if (activeDelta !== 0) return activeDelta;
+
     const dir = sortDirection === 'asc' ? 1 : -1;
     switch (sortColumn) {
       case 'apartment_number':
@@ -87,7 +91,7 @@ export default function Tenants() {
       case 'standing_order_start_date':
         return (a.standing_order_start_date || '').localeCompare(b.standing_order_start_date || '') * dir;
       case 'is_active':
-        return ((a.is_active ? 1 : 0) - (b.is_active ? 1 : 0)) * dir;
+        return 0;  // already handled by activeDelta above
       case 'expected_payment': {
         const aV = a.expected_payment ?? a.building_expected_payment ?? 0;
         const bV = b.expected_payment ?? b.building_expected_payment ?? 0;
@@ -98,8 +102,11 @@ export default function Tenants() {
         const bD = tenantDebts?.[b.id] ?? 0;
         return (aD - bD) * dir;
       }
-      case 'move_in_date':
-        return (a.move_in_date || '').localeCompare(b.move_in_date || '') * dir;
+      case 'move_in_date': {
+        const aV = a.effective_move_in_date || a.move_in_date || '';
+        const bV = b.effective_move_in_date || b.move_in_date || '';
+        return aV.localeCompare(bV) * dir;
+      }
       default:
         return 0;
     }
@@ -109,6 +116,7 @@ export default function Tenants() {
     queryClient.invalidateQueries({ queryKey: ['tenants', buildingId] });
     queryClient.invalidateQueries({ queryKey: ['building', buildingId] });
     queryClient.invalidateQueries({ queryKey: ['paymentStatus', buildingId] });
+    queryClient.invalidateQueries({ queryKey: ['tenantDebts', buildingId] });
   };
 
   const handleDelete = async () => {
@@ -158,6 +166,20 @@ export default function Tenants() {
     setSavingMoveIn(true);
     try {
       await tenantsAPI.update(tenant.id, { move_in_date: editingMoveInValue });
+      invalidate();
+      setEditingMoveInId(null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingMoveIn(false);
+    }
+  };
+
+  // Reset per-tenant override → fall back to building default
+  const handleResetMoveIn = async (tenant: Tenant) => {
+    setSavingMoveIn(true);
+    try {
+      await tenantsAPI.update(tenant.id, { move_in_date: null });
       invalidate();
       setEditingMoveInId(null);
     } catch (err) {
@@ -396,7 +418,7 @@ export default function Tenants() {
                         )}
                       </td>
 
-                      {/* Task 15: תאריך כניסה (move_in_date) */}
+                      {/* Task 15: תאריך כניסה (move_in_date) — two-tier: tenant override → building default */}
                       <td className="px-4 py-3 text-sm">
                         {editingMoveInId === tenant.id ? (
                           <div className="flex items-center gap-1">
@@ -415,24 +437,47 @@ export default function Tenants() {
                               onClick={() => handleSaveMoveIn(tenant)}
                               disabled={savingMoveIn}
                               className="text-green-600 hover:text-green-800 text-xs font-bold px-1"
+                              title="שמור"
                             >✓</button>
                             <button
                               onClick={() => setEditingMoveInId(null)}
                               className="text-gray-400 hover:text-gray-600 text-xs px-1"
+                              title="ביטול"
                             >✕</button>
+                            {tenant.move_in_date && (
+                              <button
+                                onClick={() => handleResetMoveIn(tenant)}
+                                disabled={savingMoveIn}
+                                className="text-xs text-blue-500 hover:text-blue-700"
+                                title="חזור לברירת מחדל של הבניין"
+                              >🔄</button>
+                            )}
                           </div>
                         ) : (
                           <button
                             onClick={() => {
                               setEditingMoveInId(tenant.id);
-                              setEditingMoveInValue(tenant.move_in_date || '2026-01-01');
+                              setEditingMoveInValue(
+                                tenant.move_in_date
+                                || tenant.effective_move_in_date
+                                || tenant.building_default_move_in_date
+                                || '2026-01-01'
+                              );
                             }}
                             className="text-gray-600 hover:text-blue-600 hover:underline cursor-pointer text-sm"
-                            title="לחץ לעריכת תאריך כניסה"
+                            title={tenant.move_in_date ? 'לחץ לעריכת תאריך כניסה' : 'משתמש בברירת מחדל של הבניין — לחץ לעריכה'}
                           >
-                            {tenant.move_in_date
-                              ? new Date(tenant.move_in_date).toLocaleDateString('he-IL')
-                              : '01/01/2026'}
+                            {tenant.move_in_date ? (
+                              <span className="text-gray-900">
+                                {new Date(tenant.move_in_date).toLocaleDateString('he-IL')}
+                              </span>
+                            ) : tenant.effective_move_in_date ? (
+                              <span className="text-gray-400">
+                                {new Date(tenant.effective_move_in_date).toLocaleDateString('he-IL')}*
+                              </span>
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
                           </button>
                         )}
                       </td>

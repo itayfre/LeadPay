@@ -43,7 +43,8 @@ def create_building(
         )
 
     try:
-        db_building = Building(**building.model_dump())
+        # exclude_none so the DB's server_default kicks in for omitted fields like default_move_in_date
+        db_building = Building(**building.model_dump(exclude_none=True))
         db.add(db_building)
         db.flush()  # populate db_building.id before seeding categories
 
@@ -71,6 +72,7 @@ def _building_row(building: Building, tenant_count: int, total_expected: float) 
         "bank_account_number": building.bank_account_number,
         "total_tenants": tenant_count,
         "expected_monthly_payment": float(building.expected_monthly_payment) if building.expected_monthly_payment else None,
+        "default_move_in_date": building.default_move_in_date.isoformat() if building.default_move_in_date else None,
         "total_expected_monthly": total_expected,
         "created_at": building.created_at.isoformat() if building.created_at else None,
         "updated_at": building.updated_at.isoformat() if building.updated_at else None,
