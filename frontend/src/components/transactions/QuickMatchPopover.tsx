@@ -7,6 +7,7 @@ interface Props {
   row: TransactionRow;
   onClose: () => void;
   onOpenSplit: () => void;
+  onMatched?: () => void;
 }
 
 /**
@@ -17,7 +18,7 @@ interface Props {
  * For multi-tenant splits or monthly periods, the user clicks "פיצול" which
  * hands control to the existing AllocationDrawer (handled by the parent).
  */
-export default function QuickMatchPopover({ row, onClose, onOpenSplit }: Props) {
+export default function QuickMatchPopover({ row, onClose, onOpenSplit, onMatched }: Props) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [remember, setRemember] = useState(true);
@@ -42,6 +43,7 @@ export default function QuickMatchPopover({ row, onClose, onOpenSplit }: Props) 
     mutationFn: (tenantId: string) => statementsAPI.manualMatch(row.id, tenantId, remember),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      onMatched?.();
       onClose();
     },
   });

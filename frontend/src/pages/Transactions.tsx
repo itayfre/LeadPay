@@ -58,6 +58,18 @@ function MatchStatusBadge({ row }: { row: TransactionRow }) {
   if (row.is_confirmed && row.matched_tenant_id) {
     return <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-800">✅ אושר</span>;
   }
+  // Non-tenant labeled allocation (confirmed, no tenant, single row)
+  if (row.is_confirmed && !row.matched_tenant_id && row.allocations_summary.count >= 1) {
+    const label = row.allocations_summary.top_label ?? 'הכנסה אחרת';
+    return (
+      <span
+        className="inline-block px-2 py-0.5 rounded-full text-xs bg-indigo-100 text-indigo-800"
+        title={label}
+      >
+        🏷️ {label}
+      </span>
+    );
+  }
   if (row.matched_tenant_id) {
     const conf = row.match_confidence ? Math.round(row.match_confidence * 100) : null;
     return (
@@ -92,6 +104,9 @@ function TenantCell({ row }: { row: TransactionRow }) {
         {first}{extra > 0 ? ` +${extra}` : ''}
       </span>
     );
+  }
+  if (row.is_confirmed && !row.matched_tenant_id && row.allocations_summary.top_label) {
+    return <span className="text-sm text-indigo-700">{row.allocations_summary.top_label}</span>;
   }
   return <span className="text-sm text-gray-400">—</span>;
 }
@@ -129,6 +144,14 @@ export default function Transactions() {
   const [showAdd, setShowAdd] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // Auto-dismiss toast
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 1800);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   useEffect(() => {
     try { localStorage.setItem(VIEW_STORAGE_KEY, view); } catch {}
@@ -154,7 +177,10 @@ export default function Transactions() {
 
   const unmatchMutation = useMutation({
     mutationFn: (txId: string) => statementsAPI.unmatchTransaction(txId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['transactions'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      setToast('✓ ההתאמה בוטלה');
+    },
   });
 
   const handleDelete = async () => {
@@ -330,8 +356,10 @@ export default function Transactions() {
                         )}
                         <td className="px-3 py-2.5">
                           <div className="flex gap-1.5">
-                            {/* Match action: unmatched payments only (not "ignored", not already matched) */}
-                            {!row.matched_tenant_id && !row.is_confirmed && row.transaction_type !== 'other' && (
+                            {/* Match action: unmatched payments AND non-tenant labeled rows (so user can reassign to a tenant) */}
+                            {((!row.matched_tenant_id && !row.is_confirmed) ||
+                              (row.is_confirmed && !row.matched_tenant_id && row.allocations_summary.count < 2)) &&
+                              row.transaction_type !== 'other' && (
                               <button
                                 onClick={() => setMatchRow(row)}
                                 className="text-gray-400 hover:text-blue-600 transition-colors"
@@ -427,6 +455,7 @@ export default function Transactions() {
         <QuickMatchPopover
           row={matchRow}
           onClose={() => setMatchRow(null)}
+          onMatched={() => setToast('✓ ההתאמה נשמרה')}
           onOpenSplit={() => {
             setSplitTxId(matchRow.id);
             setMatchRow(null);
@@ -441,6 +470,7 @@ export default function Transactions() {
           onSaved={() => {
             queryClient.invalidateQueries({ queryKey: ['transactions'] });
             setSplitTxId(null);
+            setToast('✓ ההקצאה נשמרה');
           }}
         />
       )}
@@ -452,6 +482,15 @@ export default function Transactions() {
       {deleteError && deleteRow && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-red-700 text-sm shadow-lg">
           {deleteError}
+        </div>
+      )}
+
+      {toast && (
+        <div
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[100] bg-green-600 text-white rounded-lg px-4 py-2 text-sm font-medium shadow-lg"
+          dir="rtl"
+        >
+          {toast}
         </div>
       )}
       <ConfirmDialog
