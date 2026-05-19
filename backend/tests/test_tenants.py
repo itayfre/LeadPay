@@ -150,6 +150,60 @@ def test_import_strips_column_header_whitespace(building_id):
     assert not data["errors"], f"Expected no errors, got: {data['errors']}"
 
 
+def test_import_nan_ownership_defaults_to_renter(building_id):
+    """Empty ownership cell should silently default to שוכר — no error, row imported."""
+    import io
+    import pandas as pd
+
+    df = pd.DataFrame([{
+        'דירה': 10,
+        'קומה': 1,
+        'שם': 'דייר בדיקה',
+        'סוג בעלות': None,  # empty → NaN in Excel
+        'טלפון': None,
+    }])
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False)
+    buf.seek(0)
+
+    response = client.post(
+        f"/api/v1/tenants/{building_id}/import",
+        files={"file": ("test.xlsx", buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    )
+    assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.json()}"
+    data = response.json()
+    assert data["imported_count"] == 1, f"Expected 1 imported: {data}"
+    assert not data["errors"], f"Expected no errors: {data['errors']}"
+
+
+def test_import_invalid_ownership_defaults_to_renter_with_warning(building_id):
+    """Unrecognised ownership value should import as שוכר and include a warning."""
+    import io
+    import pandas as pd
+
+    df = pd.DataFrame([{
+        'דירה': 20,
+        'קומה': 2,
+        'שם': 'דייר בדיקה שני',
+        'סוג בעלות': 'foo',  # invalid value
+        'טלפון': None,
+    }])
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False)
+    buf.seek(0)
+
+    response = client.post(
+        f"/api/v1/tenants/{building_id}/import",
+        files={"file": ("test.xlsx", buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    )
+    assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.json()}"
+    data = response.json()
+    assert data["imported_count"] == 1, f"Expected 1 imported: {data}"
+    assert len(data["errors"]) == 1, f"Expected 1 warning: {data['errors']}"
+    assert "foo" in data["errors"][0], f"Warning should mention bad value: {data['errors'][0]}"
+    assert "שוכר" in data["errors"][0], f"Warning should mention fallback: {data['errors'][0]}"
+
+
 def test_patch_apartment_expected_payment(building_id):
     """Can set and clear apartment expected_payment."""
     # First create an apartment via resolve

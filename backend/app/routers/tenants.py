@@ -366,16 +366,21 @@ async def import_tenants_from_excel(
                 db.add(apartment)
                 db.flush()
 
-            # Map ownership type
+            # Map ownership type — empty/NaN defaults silently to RENTER;
+            # unrecognised non-empty value still imports as RENTER but adds a warning.
             ownership_map = {
                 'בעלים': OwnershipType.OWNER,
                 'משכיר': OwnershipType.LANDLORD,
                 'שוכר': OwnershipType.RENTER
             }
-            ownership_type = ownership_map.get(row['ownership_type'])
-            if not ownership_type:
-                errors.append(f"שורה {index + 1}: סוג בעלות לא חוקי '{row['ownership_type']}'. ערכים חוקיים: בעלים, משכיר, שוכר")
-                continue
+            raw_ownership = row['ownership_type']
+            is_missing = pd.isna(raw_ownership) or str(raw_ownership).strip() == ''
+            ownership_str = '' if is_missing else str(raw_ownership).strip()
+            ownership_type = ownership_map.get(ownership_str)
+            if ownership_type is None:
+                ownership_type = OwnershipType.RENTER
+                if not is_missing:
+                    errors.append(f"שורה {index + 1}: סוג בעלות לא חוקי '{raw_ownership}' — שונה לשוכר")
 
             # Check for existing tenant with same name in this apartment
             existing = db.query(Tenant).filter(
