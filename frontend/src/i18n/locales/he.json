@@ -93,9 +93,9 @@
     "filterSize": "גודל:",
     "filterStatus": "סטטוס:",
     "all": "הכל",
-    "allPaid": "✅ שילמו הכל",
-    "partialPaid": "⚠️ חלקי",
-    "nonePaid": "❌ לא שילמו",
+    "allPaid": "שולם",
+    "partialPaid": "חלקי",
+    "nonePaid": "לא שולם",
     "small": "קטן (1–5)",
     "medium": "בינוני (6–15)",
     "large": "גדול (16+)",
@@ -103,9 +103,49 @@
     "viewPayments": "צפה בסטטוס תשלומים",
     "editDetails": "ערוך פרטים",
     "deleteBuilding": "מחק בניין",
+    "deleteConfirm": "האם אתה בטוח שברצונך למחוק את \"{{name}}\"? פעולה זו תמחק גם את כל הדיירים, דפי החשבון וההודעות הקשורים לבניין זה. פעולה זו לא ניתנת לביטול!",
+    "deleteConfirmCta": "מחק לצמיתות",
     "chart": {
       "title": "מגמת גבייה — 13 חודשים",
       "subtitle": "שיעור גבייה לכל בניין לפי חודש"
+    },
+    "header": {
+      "summary": "{{count}} בניינים מתוך {{total}}"
+    },
+    "kpi": {
+      "collectionRate": "אחוז גבייה החודש",
+      "collected": "נגבה",
+      "overdue": "בפיגור",
+      "atRisk": "בניינים בסיכון",
+      "outOf": "מתוך",
+      "outOfTotal": "מתוך {{total}}",
+      "unpaidTenants_one": "{{count}} דייר לא שילם",
+      "unpaidTenants_other": "{{count}} דיירים לא שילמו",
+      "needsAttention": "דורש תשומת לב"
+    },
+    "card": {
+      "target": "יעד",
+      "collected": "נגבה",
+      "overdue": "פיגור",
+      "units_one": "יחידה אחת",
+      "units_other": "{{count}} יחידות",
+      "paidOfTotal": "{{paid}}/{{total}} שילמו",
+      "noMonthlyRate": "לא הוגדר תעריף חודשי",
+      "trend13m": "מגמת 13 חודשים",
+      "noTrend": "אין נתונים"
+    },
+    "status": {
+      "onTrack": "במסלול",
+      "partial": "פיגור חלקי",
+      "atRisk": "סיכון גבוה",
+      "needsSetup": "דרוש הגדרה"
+    },
+    "empty": {
+      "title": "אין בניינים במערכת",
+      "body": "הוסף בניין כדי להתחיל לעקוב אחר תשלומים",
+      "firstCta": "הוסף בניין ראשון",
+      "filteredTitle": "לא נמצאו בניינים התואמים לסינון",
+      "filteredBody": "נסה לשנות את פרמטרי החיפוש או הסינון"
     }
   },
   "whatsapp": {

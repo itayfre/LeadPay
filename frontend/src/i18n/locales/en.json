@@ -93,9 +93,9 @@
     "filterSize": "Size:",
     "filterStatus": "Status:",
     "all": "All",
-    "allPaid": "✅ All Paid",
-    "partialPaid": "⚠️ Partial",
-    "nonePaid": "❌ None Paid",
+    "allPaid": "Paid",
+    "partialPaid": "Partial",
+    "nonePaid": "Unpaid",
     "small": "Small (1–5)",
     "medium": "Medium (6–15)",
     "large": "Large (16+)",
@@ -103,9 +103,49 @@
     "viewPayments": "View Payment Status",
     "editDetails": "Edit Details",
     "deleteBuilding": "Delete Building",
+    "deleteConfirm": "Are you sure you want to delete \"{{name}}\"? This will also delete all related tenants, statements, and messages. This action cannot be undone!",
+    "deleteConfirmCta": "Delete permanently",
     "chart": {
       "title": "Collection Trend — 13 Months",
       "subtitle": "Collection rate per building by month"
+    },
+    "header": {
+      "summary": "{{count}} of {{total}} buildings"
+    },
+    "kpi": {
+      "collectionRate": "Collection rate this month",
+      "collected": "Collected",
+      "overdue": "Overdue",
+      "atRisk": "Buildings at risk",
+      "outOf": "of",
+      "outOfTotal": "of {{total}}",
+      "unpaidTenants_one": "{{count}} tenant unpaid",
+      "unpaidTenants_other": "{{count}} tenants unpaid",
+      "needsAttention": "Needs attention"
+    },
+    "card": {
+      "target": "Target",
+      "collected": "Collected",
+      "overdue": "Overdue",
+      "units_one": "1 unit",
+      "units_other": "{{count}} units",
+      "paidOfTotal": "{{paid}}/{{total}} paid",
+      "noMonthlyRate": "No monthly rate set",
+      "trend13m": "13-month trend",
+      "noTrend": "No data"
+    },
+    "status": {
+      "onTrack": "On track",
+      "partial": "Partial",
+      "atRisk": "At risk",
+      "needsSetup": "Needs setup"
+    },
+    "empty": {
+      "title": "No buildings yet",
+      "body": "Add a building to start tracking payments",
+      "firstCta": "Add first building",
+      "filteredTitle": "No buildings match the filters",
+      "filteredBody": "Try changing the search or filter parameters"
     }
   },
   "whatsapp": {
