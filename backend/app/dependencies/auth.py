@@ -61,8 +61,19 @@ def require_building_access(building_id: UUID, user: User = Depends(get_current_
     return user
 
 
+def assert_tenant_building_access(user: User, building_id) -> None:
+    """Raise 403 if user is a TENANT and building_id doesn't match their assignment.
+    No-op for non-tenant roles. Call inside endpoints that take a building_id from the path."""
+    if user.role == UserRole.TENANT and str(user.building_id) != str(building_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access to this building is not permitted",
+        )
+
+
 # Convenience role-check shortcuts
 require_manager = require_role(UserRole.MANAGER)
 require_worker_plus = require_role(UserRole.MANAGER, UserRole.WORKER)
 require_viewer_plus = require_role(UserRole.MANAGER, UserRole.WORKER, UserRole.VIEWER)
+require_viewer_or_tenant = require_role(UserRole.MANAGER, UserRole.WORKER, UserRole.VIEWER, UserRole.TENANT)
 require_any_auth = require_role(UserRole.MANAGER, UserRole.WORKER, UserRole.VIEWER, UserRole.TENANT)

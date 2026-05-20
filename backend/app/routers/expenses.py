@@ -24,7 +24,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from ..database import get_db
-from ..dependencies.auth import require_viewer_plus, require_worker_plus
+from ..dependencies.auth import (
+    require_viewer_plus,
+    require_worker_plus,
+    require_viewer_or_tenant,
+    assert_tenant_building_access,
+)
 from ..models import (
     BankStatement,
     Building,
@@ -96,9 +101,10 @@ def _ensure_building(db: Session, building_id: UUID) -> Building:
 def list_categories(
     building_id: UUID,
     db: Session = Depends(get_db),
-    _: User = Depends(require_viewer_plus),
+    current_user: User = Depends(require_viewer_or_tenant),
 ):
     """List active expense categories for a building."""
+    assert_tenant_building_access(current_user, building_id)
     _ensure_building(db, building_id)
     rows = (
         db.query(ExpenseCategory)
@@ -212,8 +218,9 @@ def list_expenses(
     from_: str = Query(..., alias="from"),
     to: str = Query(...),
     db: Session = Depends(get_db),
-    _: User = Depends(require_viewer_plus),
+    current_user: User = Depends(require_viewer_or_tenant),
 ):
+    assert_tenant_building_access(current_user, building_id)
     """
     List expense allocations for a building over an inclusive YYYY-MM range,
     joined to category metadata (left-join — uncategorized included).

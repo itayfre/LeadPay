@@ -16,7 +16,13 @@ from ..models import (
 )
 from ..models.user import User
 from ..services import allocation_service
-from ..dependencies.auth import require_worker_plus, require_viewer_plus
+from ..dependencies.auth import (
+    require_worker_plus,
+    require_viewer_plus,
+    require_viewer_or_tenant,
+    assert_tenant_building_access,
+)
+from ..models.user import UserRole
 
 router = APIRouter(
     prefix="/api/v1/payments",
@@ -29,7 +35,7 @@ def get_bulk_payment_summary(
     month: Optional[int] = None,
     year: Optional[int] = None,
     db: Session = Depends(get_db),
-    _: User = Depends(require_viewer_plus),
+    current_user: User = Depends(require_viewer_or_tenant),
 ):
     """
     Return payment summary for ALL buildings for a given month/year.
@@ -46,7 +52,12 @@ def get_bulk_payment_summary(
         month = now.month
         year = now.year
 
-    buildings = db.query(Building).all()
+    bq = db.query(Building)
+    if current_user.role == UserRole.TENANT:
+        if not current_user.building_id:
+            return []
+        bq = bq.filter(Building.id == current_user.building_id)
+    buildings = bq.all()
     if not buildings:
         return []
 
@@ -182,7 +193,7 @@ def _build_month_list(months: int) -> List[tuple]:
 def get_portfolio_trend(
     months: int = 13,
     db: Session = Depends(get_db),
-    _: User = Depends(require_viewer_plus),
+    current_user: User = Depends(require_viewer_or_tenant),
 ):
     """
     Multi-month portfolio collection trend, in one round trip.
@@ -196,7 +207,12 @@ def get_portfolio_trend(
             detail="months must be between 1 and 36",
         )
 
-    buildings = db.query(Building).all()
+    bq = db.query(Building)
+    if current_user.role == UserRole.TENANT:
+        if not current_user.building_id:
+            return []
+        bq = bq.filter(Building.id == current_user.building_id)
+    buildings = bq.all()
     if not buildings:
         return []
 
@@ -416,7 +432,7 @@ def create_manual_payment(
 def get_tenant_payment_history(
     tenant_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(require_viewer_plus),
+    current_user: User = Depends(require_viewer_or_tenant),
 ):
     """
     Return month-by-month payment history for a tenant from move_in_date to current month.
@@ -430,6 +446,7 @@ def get_tenant_payment_history(
     apartment = db.query(Apartment).filter(Apartment.id == tenant.apartment_id).first()
     if not apartment:
         raise HTTPException(status_code=404, detail="Apartment not found for tenant")
+    assert_tenant_building_access(current_user, apartment.building_id)
     building = db.query(Building).filter(Building.id == apartment.building_id).first()
     if not building:
         raise HTTPException(status_code=404, detail="Building not found for apartment")
@@ -571,13 +588,14 @@ def get_tenant_payment_history(
 def get_tenant_debts(
     building_id: UUID,
     db: Session = Depends(get_db),
-    _: User = Depends(require_viewer_plus),
+    current_user: User = Depends(require_viewer_or_tenant),
 ):
     """
     Return cumulative all-time debt (from move_in_date to today) for every
     active tenant in a building. Single batch DB query — no N+1.
     Returns: { tenant_id: total_debt }
     """
+    assert_tenant_building_access(current_user, building_id)
 
     building = db.query(Building).filter(Building.id == building_id).first()
     if not building:
@@ -638,13 +656,14 @@ def get_payment_status(
     month: Optional[int] = None,
     year: Optional[int] = None,
     db: Session = Depends(get_db),
-    _: User = Depends(require_viewer_plus),
+    current_user: User = Depends(require_viewer_or_tenant),
 ):
     """
     Get payment status for all tenants in a building for a specific period.
     If month/year not specified, uses the latest bank statement period.
     Amounts are read through transaction_allocations (supports splits).
     """
+    assert_tenant_building_access(current_user, building_id)
     building = db.query(Building).filter(Building.id == building_id).first()
     if not building:
         raise HTTPException(
@@ -828,10 +847,11 @@ def get_unpaid_tenants(
     month: Optional[int] = None,
     year: Optional[int] = None,
     db: Session = Depends(get_db),
-    _: User = Depends(require_viewer_plus),
+    current_user: User = Depends(require_viewer_or_tenant),
 ):
     """Get list of tenants who haven't paid for a specific period"""
-    status_data = get_payment_status(building_id, month, year, db)
+    assert_tenant_building_access(current_user, building_id)
+    status_data = get_payment_status(building_id, month, year, db, current_user)
 
     unpaid_tenants = [
         t for t in status_data['tenants']
@@ -852,9 +872,10 @@ def get_payment_history(
     building_id: UUID,
     months: int = 6,
     db: Session = Depends(get_db),
-    _: User = Depends(require_viewer_plus),
+    current_user: User = Depends(require_viewer_or_tenant),
 ):
     """Get payment history for the last N months"""
+    assert_tenant_building_access(current_user, building_id)
     building = db.query(Building).filter(Building.id == building_id).first()
     if not building:
         raise HTTPException(
@@ -940,8 +961,9 @@ def get_summary_stats(
     to: str = Query(...),
     projection_months: int = Query(0, ge=0, le=24),
     db: Session = Depends(get_db),
-    _: User = Depends(require_viewer_plus),
+    current_user: User = Depends(require_viewer_or_tenant),
 ):
+    assert_tenant_building_access(current_user, building_id)
     """
     One-shot KPI + trend + expenses + debt-aging + worst-payers payload for
     the Summary tab.

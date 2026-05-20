@@ -15,7 +15,13 @@ from ..models import Building, Apartment, Tenant
 from ..models.transaction_allocation import TransactionAllocation
 from ..models.user import User
 from ..schemas import BuildingCreate, BuildingUpdate, BuildingResponse
-from ..dependencies.auth import require_manager, require_worker_plus, require_any_auth
+from ..dependencies.auth import (
+    require_manager,
+    require_worker_plus,
+    require_any_auth,
+    assert_tenant_building_access,
+)
+from ..models.user import UserRole
 from ..services.expense_categories import seed_default_categories
 from ..services.report_data import build_report_payload
 from ..services.report_pdf import render_report_pdf
@@ -111,10 +117,15 @@ def list_buildings(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    _: User = Depends(require_any_auth),
+    current_user: User = Depends(require_any_auth),
 ):
     """Get all buildings with live tenant counts — uses bulk queries to avoid N+1."""
-    buildings = db.query(Building).offset(skip).limit(limit).all()
+    q = db.query(Building)
+    if current_user.role == UserRole.TENANT:
+        if not current_user.building_id:
+            return []
+        q = q.filter(Building.id == current_user.building_id)
+    buildings = q.offset(skip).limit(limit).all()
     if not buildings:
         return []
 
@@ -159,9 +170,10 @@ def list_buildings(
 def get_building(
     building_id: UUID,
     db: Session = Depends(get_db),
-    _: User = Depends(require_any_auth),
+    current_user: User = Depends(require_any_auth),
 ):
     """Get a specific building by ID with live tenant count"""
+    assert_tenant_building_access(current_user, building_id)
     building = db.query(Building).filter(Building.id == building_id).first()
     if not building:
         raise HTTPException(
@@ -250,8 +262,9 @@ def get_building_report(
     from_: str = Query(..., alias="from"),
     to: str = Query(...),
     db: Session = Depends(get_db),
-    _: User = Depends(require_any_auth),
+    current_user: User = Depends(require_any_auth),
 ):
+    assert_tenant_building_access(current_user, building_id)
     f, t = _parse_report_period(from_, to)
     try:
         return build_report_payload(db, building_id, f, t)
@@ -265,8 +278,9 @@ def get_building_report_pdf(
     from_: str = Query(..., alias="from"),
     to: str = Query(...),
     db: Session = Depends(get_db),
-    _: User = Depends(require_any_auth),
+    current_user: User = Depends(require_any_auth),
 ):
+    assert_tenant_building_access(current_user, building_id)
     f, t = _parse_report_period(from_, to)
     try:
         payload = build_report_payload(db, building_id, f, t)
@@ -289,8 +303,9 @@ def get_building_report_docx(
     from_: str = Query(..., alias="from"),
     to: str = Query(...),
     db: Session = Depends(get_db),
-    _: User = Depends(require_any_auth),
+    current_user: User = Depends(require_any_auth),
 ):
+    assert_tenant_building_access(current_user, building_id)
     f, t = _parse_report_period(from_, to)
     try:
         payload = build_report_payload(db, building_id, f, t)

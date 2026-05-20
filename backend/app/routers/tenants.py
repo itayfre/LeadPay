@@ -16,7 +16,15 @@ from ..database import get_db
 from ..models import Tenant, Apartment, Building, OwnershipType
 from ..models.user import User
 from ..schemas import TenantCreate, TenantUpdate, TenantResponse
-from ..dependencies.auth import require_manager, require_worker_plus, require_viewer_plus, require_any_auth
+from ..dependencies.auth import (
+    require_manager,
+    require_worker_plus,
+    require_viewer_plus,
+    require_any_auth,
+    require_viewer_or_tenant,
+    assert_tenant_building_access,
+)
+from ..models.user import UserRole
 from ..services.tenant_report_data import build_tenant_report_payload
 from ..services.report_pdf import render_tenant_report_pdf
 from ..services.report_docx import render_tenant_report_docx
@@ -99,9 +107,15 @@ def list_tenants(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    _: User = Depends(require_viewer_plus),
+    current_user: User = Depends(require_viewer_or_tenant),
 ):
     """Get all tenants (optionally filtered by building), with apartment and building info."""
+    if current_user.role == UserRole.TENANT:
+        if not current_user.building_id:
+            return []
+        if building_id and str(building_id) != str(current_user.building_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access to this building is not permitted")
+        building_id = current_user.building_id
     query = (
         db.query(Tenant, Apartment, Building)
         .join(Apartment, Tenant.apartment_id == Apartment.id)
@@ -149,7 +163,7 @@ def list_tenants(
 def get_tenant(
     tenant_id: UUID,
     db: Session = Depends(get_db),
-    _: User = Depends(require_viewer_plus),
+    current_user: User = Depends(require_viewer_or_tenant),
 ):
     """Get a specific tenant by ID"""
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
@@ -158,6 +172,7 @@ def get_tenant(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Tenant with id {tenant_id} not found"
         )
+    assert_tenant_building_access(current_user, tenant.building_id)
     return tenant
 
 

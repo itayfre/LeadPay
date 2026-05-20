@@ -66,6 +66,9 @@ const Users: React.FC = () => {
   const [inviteResult, setInviteResult] = useState('');
   const [inviteError, setInviteError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [editingUser, setEditingUser] = useState<AppUser | null>(null);
+  const [editForm, setEditForm] = useState<{ full_name: string; role: string; building_id: string }>({ full_name: '', role: 'viewer', building_id: '' });
+  const [editError, setEditError] = useState('');
 
   const authHeaders = {
     'Authorization': `Bearer ${localStorage.getItem('access_token') || ''}`,
@@ -101,6 +104,53 @@ const Users: React.FC = () => {
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
   });
+
+  const updateMutation = useMutation({
+    mutationFn: async (vars: { id: string; body: { full_name?: string; role?: string; building_id?: string | null } }) => {
+      const res = await fetch(`${API_BASE_URL}/api/v1/users/${vars.id}`, {
+        method: 'PATCH',
+        headers: authHeaders,
+        body: JSON.stringify(vars.body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to update');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      setEditingUser(null);
+    },
+    onError: (err: Error) => setEditError(err.message),
+  });
+
+  const openEdit = (u: AppUser) => {
+    setEditError('');
+    setEditingUser(u);
+    setEditForm({
+      full_name: u.full_name,
+      role: u.role,
+      building_id: u.building_id || '',
+    });
+  };
+
+  const submitEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setEditError('');
+    const body: { full_name?: string; role?: string; building_id?: string | null } = {};
+    if (editForm.full_name !== editingUser.full_name) body.full_name = editForm.full_name;
+    if (editForm.role !== editingUser.role) body.role = editForm.role;
+    const newBuildingId = editForm.role === 'tenant' ? (editForm.building_id || null) : null;
+    const oldBuildingId = editingUser.building_id || null;
+    if (newBuildingId !== oldBuildingId) body.building_id = newBuildingId;
+    if (Object.keys(body).length === 0) {
+      setEditingUser(null);
+      return;
+    }
+    updateMutation.mutate({ id: editingUser.id, body });
+  };
 
   const deleteMutation = useMutation({
     mutationFn: async (userId: string) => {
@@ -251,6 +301,12 @@ const Users: React.FC = () => {
                           ✓ אשר
                         </button>
                       )}
+                      <button
+                        onClick={() => openEdit(u)}
+                        className="text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition font-medium"
+                      >
+                        ✏️ ערוך
+                      </button>
                       {u.id !== currentUser?.id && (
                         <button
                           onClick={() => {
@@ -272,6 +328,98 @@ const Users: React.FC = () => {
           </table>
         )}
       </div>
+
+      {/* Edit User Modal */}
+      {editingUser && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          dir="rtl"
+          onClick={e => { if (e.target === e.currentTarget) setEditingUser(null); }}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-bold text-gray-900">עריכת משתמש</h2>
+              <button
+                onClick={() => setEditingUser(null)}
+                className="text-gray-400 hover:text-gray-600 text-2xl leading-none w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100"
+              >
+                ×
+              </button>
+            </div>
+            <form onSubmit={submitEdit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">שם מלא</label>
+                <input
+                  type="text"
+                  required
+                  value={editForm.full_name}
+                  onChange={e => setEditForm(p => ({ ...p, full_name: e.target.value }))}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-right"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">אימייל</label>
+                <input
+                  type="email"
+                  disabled
+                  value={editingUser.email}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl bg-gray-50 text-gray-500"
+                  dir="ltr"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">תפקיד</label>
+                <select
+                  value={editForm.role}
+                  onChange={e => setEditForm(p => ({ ...p, role: e.target.value, building_id: e.target.value === 'tenant' ? p.building_id : '' }))}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="manager">מנהל – גישה מלאה</option>
+                  <option value="worker">עובד – יכול לצפות ולערוך</option>
+                  <option value="viewer">צופה – יכול לצפות בלבד</option>
+                  <option value="tenant">דייר – רואה בניין שלו בלבד</option>
+                </select>
+              </div>
+              {editForm.role === 'tenant' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">בניין (לדיירים)</label>
+                  <select
+                    value={editForm.building_id}
+                    onChange={e => setEditForm(p => ({ ...p, building_id: e.target.value }))}
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="">-- בחר בניין --</option>
+                    {buildings.map(b => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {editError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2.5 rounded-xl text-sm">
+                  {editError}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingUser(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition"
+                >
+                  ביטול
+                </button>
+                <button
+                  type="submit"
+                  disabled={updateMutation.isPending}
+                  className="flex-1 bg-gradient-to-r from-primary-600 to-indigo-600 text-white py-2.5 rounded-xl font-semibold hover:from-primary-700 hover:to-indigo-700 transition shadow-md disabled:opacity-50"
+                >
+                  {updateMutation.isPending ? 'שומר...' : 'שמור'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Invite Modal */}
       {showInviteModal && (
