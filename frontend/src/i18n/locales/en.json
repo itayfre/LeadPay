@@ -198,6 +198,25 @@
     "error": "Error",
     "success": "Success"
   },
+  "settings": {
+    "thresholds": {
+      "title": "Building risk thresholds",
+      "description": "Defines when a building is marked \"at risk\" / \"partial\" / \"on track\" on the home page",
+      "partialLabel": "Partial below ",
+      "partialHint": "Buildings with collection rate below this are marked \"at risk\"",
+      "onTrackLabel": "On track above ",
+      "onTrackHint": "Buildings with collection rate above this are marked \"on track\"",
+      "save": "Save",
+      "saved": "Saved",
+      "resetDefaults": "Reset to defaults",
+      "errors": {
+        "integer": "Enter whole numbers only",
+        "range": "Thresholds must be between 0 and 100",
+        "order": "Partial threshold must be less than on-track threshold",
+        "notManager": "Only managers can edit this setting"
+      }
+    }
+  },
   "review": {
     "currentSection": "From the file you just uploaded",
     "currentSubtitle": "The file you uploaded: bank statement {{period}}.",

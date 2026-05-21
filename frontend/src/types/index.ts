@@ -25,6 +25,17 @@ export interface BuildingPaymentSummary {
   total_expected?: number;       // sum of active tenants' expected payments for the period
 }
 
+// ---- System-wide configuration (app_config table) ----
+
+export interface RiskThresholds {
+  partial: number;     // < partial%  → atRisk
+  onTrack: number;     // >= onTrack% → onTrack;  else partial
+}
+
+export interface AppConfig {
+  risk_thresholds: RiskThresholds;
+}
+
 // ---- Stage 1 backend additions ----
 
 export interface PortfolioTrendBuilding {

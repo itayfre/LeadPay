@@ -1,15 +1,24 @@
-export const RISK_THRESHOLDS = { partial: 30, onTrack: 70 } as const;
+import type { RiskThresholds } from '../types';
+
+/**
+ * In-code defaults — single source of truth for the home page when the
+ * backend `app_config` table has no `risk_thresholds` row yet, or when
+ * `GET /api/v1/settings/` is still loading / fails. Mirrored on the backend
+ * in `app/schemas/settings.py::DEFAULT_RISK_THRESHOLDS`.
+ */
+export const DEFAULT_RISK_THRESHOLDS: RiskThresholds = { partial: 30, onTrack: 70 };
 
 export type BuildingStatus = 'onTrack' | 'partial' | 'atRisk' | 'needsSetup';
 
 export function buildingStatus(
   hasMonthlyRate: boolean,
   collectionRate: number | undefined,
+  thresholds: RiskThresholds = DEFAULT_RISK_THRESHOLDS,
 ): BuildingStatus {
   if (!hasMonthlyRate) return 'needsSetup';
   const rate = collectionRate ?? 0;
-  if (rate >= RISK_THRESHOLDS.onTrack) return 'onTrack';
-  if (rate >= RISK_THRESHOLDS.partial) return 'partial';
+  if (rate >= thresholds.onTrack) return 'onTrack';
+  if (rate >= thresholds.partial) return 'partial';
   return 'atRisk';
 }
 

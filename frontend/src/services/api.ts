@@ -1,4 +1,4 @@
-import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview, Allocation, SetAllocationsRequest, PortfolioTrendMonth, BuildingSummaryStats, ExpenseCategory, Expense, UploadResult, BuildingReportPayload, ReportFormat, RecentUploadsResponse, TransactionPatchPayload, SplitAllocationError, ReviewTransaction, MatchSuggestion, TransactionsListParams, TransactionsListResponse, TransactionCreatePayload, TransactionRow, TenantReportPayload } from '../types';
+import type { Building, BuildingPaymentSummary, Tenant, PaymentStatusResponse, WhatsAppMessage, Transaction, TenantPaymentHistory, ManualPaymentRequest, StatementReview, Allocation, SetAllocationsRequest, PortfolioTrendMonth, BuildingSummaryStats, ExpenseCategory, Expense, UploadResult, BuildingReportPayload, ReportFormat, RecentUploadsResponse, TransactionPatchPayload, SplitAllocationError, ReviewTransaction, MatchSuggestion, TransactionsListParams, TransactionsListResponse, TransactionCreatePayload, TransactionRow, TenantReportPayload, AppConfig, RiskThresholds } from '../types';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -510,4 +510,15 @@ export const reportsAPI = {
     const filename = m ? decodeURIComponent(m[1]) : `reports.zip`;
     return { blob, filename };
   },
+};
+
+// System-wide settings (app_config K-V store)
+export const settingsAPI = {
+  get: () => fetchAPI<AppConfig>('/api/v1/settings/'),
+
+  putRiskThresholds: (body: RiskThresholds) =>
+    fetchAPI<RiskThresholds>('/api/v1/settings/risk_thresholds', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 };

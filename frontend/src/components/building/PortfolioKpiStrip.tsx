@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { useRiskThresholds } from '../../context/ConfigContext';
 
 interface Props {
   collected: number;
@@ -20,11 +21,14 @@ export default function PortfolioKpiStrip({
   unpaidTenants,
 }: Props) {
   const { t } = useTranslation();
+  const thresholds = useRiskThresholds();
   const rate = expected > 0 ? (collected / expected) * 100 : 0;
   const overdue = Math.max(expected - collected, 0);
 
   const barClass =
-    rate >= 70 ? 'bg-accent-500' : rate >= 30 ? 'bg-warn-500' : 'bg-danger-500';
+    rate >= thresholds.onTrack ? 'bg-accent-500'
+    : rate >= thresholds.partial ? 'bg-warn-500'
+    : 'bg-danger-500';
 
   return (
     <section

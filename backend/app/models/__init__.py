@@ -9,6 +9,7 @@ from .name_mapping import NameMapping, MappingCreatedBy
 from .vendor_mapping import VendorMapping
 from .message import Message, MessageType, DeliveryStatus
 from .user import User, UserRole, UserStatus
+from .app_config import AppConfig
 
 __all__ = [
     "Building",
@@ -32,4 +33,5 @@ __all__ = [
     "User",
     "UserRole",
     "UserStatus",
+    "AppConfig",
 ]

@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import './i18n';
 
 import { AuthProvider } from './context/AuthContext';
+import { ConfigProvider } from './context/ConfigContext';
 import ProtectedRoute from './components/ProtectedRoute';
 
 import Buildings from './pages/Buildings';
@@ -111,6 +112,7 @@ function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
+          <ConfigProvider>
           <BrowserRouter>
             <Routes>
               {/* ─── Public routes ─── */}
@@ -159,6 +161,7 @@ function App() {
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
+          </ConfigProvider>
         </AuthProvider>
       </QueryClientProvider>
     </ErrorBoundary>

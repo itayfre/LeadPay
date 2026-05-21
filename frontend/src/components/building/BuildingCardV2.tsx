@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Building, BuildingPaymentSummary } from '../../types';
 import { buildingStatus, STATUS_VISUALS } from '../../lib/buildingStatus';
+import { useRiskThresholds } from '../../context/ConfigContext';
 import StatusBadge from './StatusBadge';
 import Sparkline from './Sparkline';
 
@@ -21,6 +22,7 @@ function fmtIls(n: number | undefined | null): string {
 
 export default function BuildingCardV2({ building, summary, trend, onClick, onEdit, onDelete }: Props) {
   const { t } = useTranslation();
+  const thresholds = useRiskThresholds();
   const [menuOpen, setMenuOpen] = useState(false);
 
   const monthlyTarget =
@@ -38,7 +40,7 @@ export default function BuildingCardV2({ building, summary, trend, onClick, onEd
   const unpaid = summary?.unpaid ?? 0;
   const totalTenants = summary?.total_tenants ?? building.total_tenants ?? 0;
 
-  const status = buildingStatus(hasRate, summary?.collection_rate);
+  const status = buildingStatus(hasRate, summary?.collection_rate, thresholds);
   const v = STATUS_VISUALS[status];
 
   const stop = (fn: () => void) => (e: React.MouseEvent) => {

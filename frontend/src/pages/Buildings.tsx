@@ -13,11 +13,13 @@ import PortfolioKpiStrip from '../components/building/PortfolioKpiStrip';
 import FilterBar, { type SizeFilter, type StatusFilter } from '../components/building/FilterBar';
 import BuildingCardV2 from '../components/building/BuildingCardV2';
 import { buildingStatus } from '../lib/buildingStatus';
+import { useRiskThresholds } from '../context/ConfigContext';
 
 export default function Buildings() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const thresholds = useRiskThresholds();
 
   const [buildingToDelete, setBuildingToDelete] = useState<Building | null>(null);
   const [buildingToEdit, setBuildingToEdit] = useState<Building | null>(null);
@@ -132,11 +134,11 @@ export default function Buildings() {
       collected += c;
       expected += e;
       unpaidTenants += s?.unpaid ?? (b.total_tenants || 0);
-      const status = buildingStatus(hasRate, s?.collection_rate);
+      const status = buildingStatus(hasRate, s?.collection_rate, thresholds);
       if (status === 'atRisk' || status === 'needsSetup') atRisk += 1;
     }
     return { collected, expected, unpaidTenants, atRisk, total: allBuildings.length };
-  }, [buildings, summaryMap]);
+  }, [buildings, summaryMap, thresholds]);
 
   const monthLabel = useMemo(() => {
     const locale = i18n.language === 'en' ? 'en-US' : 'he-IL';
